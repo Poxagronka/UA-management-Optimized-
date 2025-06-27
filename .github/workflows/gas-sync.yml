@@ -1,0 +1,37 @@
+name: Sync with Google Apps Script
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Каждые 6 часов
+  workflow_dispatch:       # Ручной запуск
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        
+    - name: Install clasp
+      run: npm install -g @google/clasp
+      
+    - name: Create clasprc.json
+      run: echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
+        
+    - name: Pull from GAS
+      run: clasp pull
+      
+    - name: Commit changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add .
+        if ! git diff --staged --quiet; then
+          git commit -m "Auto-sync from GAS: $(date)"
+          git push
+        fi
