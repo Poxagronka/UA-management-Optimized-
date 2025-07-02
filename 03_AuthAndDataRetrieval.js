@@ -8,94 +8,219 @@ const AUTH_CONFIG = {
 
 function loginAndSaveCampaigns() {
   const startTime = new Date();
-  UTILS.log('🕒 Начало выполнения loginAndSaveCampaigns');
+  UTILS.log('🕒 Auth: Начало выполнения loginAndSaveCampaigns');
   
-  const spreadsheet = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
-  const sheetNames = ["Planning", "Bundle Grouped Campaigns"];
+  const targetSheets = UTILS.getTargetSheets();
+  if (targetSheets.length === 0) {
+    UTILS.log('❌ Auth: Не найдены целевые листы');
+    return;
+  }
+  
+  UTILS.log(`📋 Auth: Найдено ${targetSheets.length} целевых листов: ${targetSheets.map(s => s.getName()).join(', ')}`);
   
   // Сбор всех Campaign ID
   let allCampaignIds = [];
   let campaignSheetMap = {};
   
-  for (const sheetName of sheetNames) {
-    const sheet = UTILS.getSheet(sheetName);
-    if (!sheet) continue;
+  for (const sheet of targetSheets) {
+    const campaigns = collectCampaignIdsSafe(sheet, sheet.getName());
+    UTILS.log(`📊 Auth: Лист "${sheet.getName()}" - найдено ${campaigns.length} кампаний`);
     
-    const campaigns = UTILS.collectCampaignIds(sheet);
     allCampaignIds = allCampaignIds.concat(campaigns.map(c => c.id));
     
     campaigns.forEach(campaign => {
       campaignSheetMap[campaign.id] = {
-        sheetName,
+        sheetName: sheet.getName(),
         rowIndex: campaign.rowIndex
       };
     });
   }
   
   allCampaignIds = [...new Set(allCampaignIds)];
-  UTILS.log(`📊 Найдено ${allCampaignIds.length} активных кампаний`);
+  UTILS.log(`📊 Auth: Найдено ${allCampaignIds.length} активных кампаний`);
   
   if (allCampaignIds.length === 0) {
-    UTILS.log('⚠️ Не найдено активных кампаний');
+    UTILS.log('⚠️ Auth: Не найдено активных кампаний');
     return;
   }
   
   // Получение данных кампаний
   const campaignsData = fetchCampaignsData(allCampaignIds);
   if (!campaignsData || Object.keys(campaignsData).length === 0) {
-    UTILS.log('❌ Не удалось получить данные кампаний');
+    UTILS.log('❌ Auth: Не удалось получить данные кампаний');
     return;
   }
   
-  UTILS.log(`✅ Получены данные для ${Object.keys(campaignsData).length} кампаний`);
+  UTILS.log(`✅ Auth: Получены данные для ${Object.keys(campaignsData).length} кампаний`);
   
   // Обновление данных в листах
-  updateSheetsData(sheetNames, campaignsData, campaignSheetMap, spreadsheet);
+  updateSheetsData(targetSheets, campaignsData, campaignSheetMap);
   
   const executionTime = (new Date() - startTime) / 1000;
-  UTILS.log(`🏁 Скрипт выполнен за ${executionTime.toFixed(2)} секунд`);
+  UTILS.log(`🏁 Auth: Скрипт выполнен за ${executionTime.toFixed(2)} секунд`);
+}
+
+function collectCampaignIdsSafe(sheet, sheetName) {
+  UTILS.log(`🔍 Auth: Собираем Campaign ID из листа "${sheetName}"`);
+  
+  const campaignIds = [];
+  const data = sheet.getDataRange().getValues();
+  const colors = sheet.getDataRange().getBackgrounds();
+  const headers = data[0];
+  
+  // Поиск колонок
+  let idColumnIndex = -1;
+  let statusColumnIndex = -1;
+  
+  for (let i = 0; i < headers.length; i++) {
+    const headerText = String(headers[i] || "").toLowerCase();
+    if (headerText.includes("campaign id") || headerText === "id") {
+      idColumnIndex = i;
+    }
+    if (headerText.includes("campaign status") || headerText === "status") {
+      statusColumnIndex = i;
+    }
+  }
+  
+  if (idColumnIndex === -1) {
+    UTILS.log(`❌ Auth: Не найдена колонка с Campaign ID в листе "${sheetName}"`);
+    return [];
+  }
+  
+  UTILS.log(`📋 Auth: Лист "${sheetName}" - найдены колонки ID: ${idColumnIndex}, Status: ${statusColumnIndex}`);
+  
+  // Определяем стандартный цвет фона
+  const standardColor = colors[0][0];
+  let validRows = 0, skippedByColor = 0, skippedByStatus = 0, skippedByInvalidId = 0;
+  
+  // Проходим по строкам
+  for (let row = 1; row < data.length; row++) {
+    // Проверяем цвет фона
+    const currentBackgroundColor = colors[row][0];
+    if (currentBackgroundColor !== standardColor) {
+      skippedByColor++;
+      continue;
+    }
+    
+    // Проверяем статус кампании
+    if (statusColumnIndex !== -1) {
+      const status = String(data[row][statusColumnIndex] || "").toLowerCase();
+      if (status && status !== "running") {
+        skippedByStatus++;
+        continue;
+      }
+    }
+    
+    // Получаем ID кампании
+    const campaignIdCell = String(data[row][idColumnIndex] || "");
+    const campaignId = UTILS.extractCampaignId(campaignIdCell);
+    
+    if (campaignId) {
+      campaignIds.push({ 
+        id: campaignId, 
+        rowIndex: row + 1
+      });
+      validRows++;
+    } else {
+      skippedByInvalidId++;
+    }
+  }
+  
+  UTILS.log(`📊 Auth: Лист "${sheetName}" - валидных: ${validRows}, пропущено: цвет ${skippedByColor}, статус ${skippedByStatus}, невалидный ID ${skippedByInvalidId}`);
+  return campaignIds;
 }
 
 function fetchCampaignsData(campaignIds) {
+  UTILS.log(`🔐 Auth: Начинаем аутентификацию (${AUTH_CONFIG.maxAttempts} попыток)`);
+  
   for (let attempt = 0; attempt < AUTH_CONFIG.maxAttempts; attempt++) {
     try {
+      UTILS.log(`🔄 Auth: Попытка ${attempt + 1}/${AUTH_CONFIG.maxAttempts}`);
+      
       // Шаг 1: Получение страницы логина
+      UTILS.log(`📥 Auth: Получаем страницу логина`);
       const loginPageRes = UrlFetchApp.fetch(`${AUTH_CONFIG.baseUrl}/auth/`, {
         muteHttpExceptions: true,
+        followRedirects: false,
         headers: { "User-Agent": "Mozilla/5.0 (compatible; Google-Apps-Script)" }
       });
       
-      if (loginPageRes.getResponseCode() !== 200) throw new Error('Login page failed');
+      if (loginPageRes.getResponseCode() !== 200) {
+        UTILS.log(`❌ Auth: Ошибка получения страницы логина: ${loginPageRes.getResponseCode()}`);
+        throw new Error('Login page failed');
+      }
       
-      // Извлечение CSRF токена
       const loginPageText = loginPageRes.getContentText();
-      const cheerio = Cheerio.load(loginPageText);
-      const csrfToken = cheerio('input[name="csrf_token"]').val();
-      if (!csrfToken) throw new Error('CSRF token not found');
+      UTILS.log(`📄 Auth: Получена страница логина (${loginPageText.length} символов)`);
+      
+      // Извлечение CSRF токена - используем несколько методов
+      let csrfToken = null;
+      
+      // Метод 1: стандартный input
+      let match = loginPageText.match(/name=["']csrf_token["']\s+value=["']([^"']+)["']/i);
+      if (match) csrfToken = match[1];
+      
+      // Метод 2: обратный порядок атрибутов
+      if (!csrfToken) {
+        match = loginPageText.match(/value=["']([^"']+)["']\s+name=["']csrf_token["']/i);
+        if (match) csrfToken = match[1];
+      }
+      
+      // Метод 3: с type=hidden
+      if (!csrfToken) {
+        match = loginPageText.match(/<input[^>]+name=["']csrf_token["'][^>]+value=["']([^"']+)["']/i);
+        if (match) csrfToken = match[1];
+      }
+      
+      // Метод 4: поиск любого input с csrf_token
+      if (!csrfToken) {
+        match = loginPageText.match(/csrf_token["'][^>]*value=["']([^"']+)["']/i);
+        if (match) csrfToken = match[1];
+      }
+      
+      if (!csrfToken) {
+        UTILS.log(`❌ Auth: CSRF токен не найден в HTML (${loginPageText.substring(0, 500)}...)`);
+        throw new Error('CSRF token not found');
+      }
+      
+      UTILS.log(`🔑 Auth: CSRF токен получен: ${csrfToken.substring(0, 10)}...`);
       
       // Извлечение cookies
       const loginHeaders = loginPageRes.getAllHeaders();
       const initialCookies = extractCookies(loginHeaders["Set-Cookie"]);
+      UTILS.log(`🍪 Auth: Извлечены начальные cookies`);
       
       // Шаг 2: Логин
+      UTILS.log(`🔐 Auth: Выполняем логин`);
       const loginResult = performLogin(csrfToken, initialCookies);
-      if (!loginResult.success) throw new Error('Login failed');
+      if (!loginResult.success) {
+        UTILS.log(`❌ Auth: Ошибка логина`);
+        throw new Error('Login failed');
+      }
       
-      // Шаг 3: Получение страницы кампаний
-      const campaignsData = fetchCampaignsPage(loginResult.cookies, campaignIds);
+      UTILS.log(`✅ Auth: Авторизация успешна`);
+      
+      // Шаг 3: Получение страницы кампаний с улучшенным парсингом
+      UTILS.log(`🌐 Auth: Запрашиваем страницу кампаний`);
+      const campaignsData = fetchCampaignsPageWithBetterParsing(loginResult.cookies, campaignIds);
       if (campaignsData && Object.keys(campaignsData).length > 0) {
+        UTILS.log(`📦 Auth: Получено ${Object.keys(campaignsData).length} кампаний`);
         return campaignsData;
       }
       
+      UTILS.log(`⚠️ Auth: Получены пустые данные кампаний`);
+      
     } catch (error) {
-      UTILS.log(`❌ Попытка ${attempt + 1} неудачна: ${error.message}`);
+      UTILS.log(`❌ Auth: Попытка ${attempt + 1} неудачна: ${error.message}`);
       if (attempt < AUTH_CONFIG.maxAttempts - 1) {
-        Utilities.sleep((attempt + 1) * 5000);
+        const sleepTime = (attempt + 1) * 5000;
+        UTILS.log(`⏱️ Auth: Ожидание ${sleepTime}мс перед следующей попыткой`);
+        Utilities.sleep(sleepTime);
       }
     }
   }
   
-  UTILS.log(`❌ Не удалось получить данные после ${AUTH_CONFIG.maxAttempts} попыток`);
+  UTILS.log(`❌ Auth: Не удалось получить данные после ${AUTH_CONFIG.maxAttempts} попыток`);
   return {};
 }
 
@@ -128,7 +253,12 @@ function performLogin(csrfToken, initialCookies) {
   };
   
   const loginRes = UrlFetchApp.fetch(`${AUTH_CONFIG.baseUrl}/auth/`, loginOptions);
-  if (loginRes.getResponseCode() !== 302) {
+  const statusCode = loginRes.getResponseCode();
+  
+  UTILS.log(`🔐 Auth: Ответ логина - статус: ${statusCode}`);
+  
+  if (statusCode !== 302) {
+    UTILS.log(`❌ Auth: Ожидался редирект (302), получен ${statusCode}`);
     return { success: false };
   }
   
@@ -136,7 +266,10 @@ function performLogin(csrfToken, initialCookies) {
   const loginHeaders = loginRes.getAllHeaders();
   const loginCookies = loginHeaders["Set-Cookie"] || loginHeaders["set-cookie"];
   
-  if (!loginCookies) return { success: false };
+  if (!loginCookies) {
+    UTILS.log(`❌ Auth: Не получены cookies после логина`);
+    return { success: false };
+  }
   
   let sessionCookie = "", rememberToken = "";
   const cookiesArray = Array.isArray(loginCookies) ? loginCookies : [loginCookies];
@@ -152,68 +285,151 @@ function performLogin(csrfToken, initialCookies) {
     }
   }
   
-  if (!sessionCookie || !rememberToken) return { success: false };
+  if (!sessionCookie || !rememberToken) {
+    UTILS.log(`❌ Auth: Не найдены session cookies - session: ${!!sessionCookie}, remember: ${!!rememberToken}`);
+    return { success: false };
+  }
   
+  UTILS.log(`🍪 Auth: Получены session cookies`);
   return { success: true, cookies: `${rememberToken}; ${sessionCookie}` };
 }
 
-function fetchCampaignsPage(cookies, campaignIds) {
+function fetchCampaignsPageWithBetterParsing(cookies, campaignIds) {
   const options = {
     method: "get",
     headers: {
       "Cookie": cookies,
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Cache-Control": "no-cache",
+      "Pragma": "no-cache"
     },
     muteHttpExceptions: true,
     followRedirects: true
   };
   
-  // Несколько попыток получения данных
-  for (let i = 0; i < 3; i++) {
+  // Несколько попыток получения данных с разными параметрами
+  for (let i = 0; i < 5; i++) {
+    UTILS.log(`📡 Auth: Запрос кампаний - попытка ${i + 1}/5`);
+    
+    const baseDelay = i > 0 ? 1500 * i : 0;
+    if (baseDelay > 0) {
+      UTILS.log(`⏱️ Auth: Ожидание ${baseDelay}мс`);
+      Utilities.sleep(baseDelay);
+    }
+    
     const url = `${AUTH_CONFIG.baseUrl}/campaigns/?_nocache=${Date.now()}_${i}`;
     const response = UrlFetchApp.fetch(url, options);
     
     if (response.getResponseCode() === 200) {
       const content = response.getContentText();
-      const data = extractCampaignsData(content, campaignIds);
+      UTILS.log(`📄 Auth: Получен ответ (${content.length} символов)`);
       
-      if (Object.keys(data).length > 0) return data;
+      // Проверяем что в ответе есть данные о кампаниях
+      const hasTableData = content.includes('<table class="table');
+      const hasJsonData = content.includes('window.__DATA__') || (content.includes('"id":') && content.includes('"title":'));
+      const hasTargetCampaigns = campaignIds.some(id => content.includes(`"id":${id}`));
+      
+      UTILS.log(`🔍 Auth: Анализ ответа - Table: ${hasTableData}, JSON: ${hasJsonData}, Target campaigns: ${hasTargetCampaigns}`);
+      
+      if (content.length >= 300000 && (hasJsonData || hasTableData)) {
+        UTILS.log(`✅ Auth: Получен полный ответ, начинаем парсинг`);
+        const data = extractCampaignsDataAdvanced(content, campaignIds);
+        
+        if (Object.keys(data).length > 0) {
+          UTILS.log(`✅ Auth: Извлечено ${Object.keys(data).length} кампаний из HTML`);
+          return data;
+        }
+      }
+      
+      // Если полных данных нет, но есть частичные
+      if (hasTargetCampaigns) {
+        UTILS.log(`📊 Auth: Найдены частичные данные, используем минимальный парсинг`);
+        const minimalData = extractMinimalCampaignData(content, campaignIds);
+        if (Object.keys(minimalData).length > 0) {
+          UTILS.log(`📦 Auth: Извлечено ${Object.keys(minimalData).length} кампаний (минимальные данные)`);
+          return minimalData;
+        }
+      }
+      
+      UTILS.log(`⚠️ Auth: Не найдены данные кампаний в ответе`);
+    } else {
+      UTILS.log(`❌ Auth: Ошибка запроса кампаний: ${response.getResponseCode()}`);
     }
-    
-    Utilities.sleep(1000 * (i + 1));
   }
   
   return {};
 }
 
-function extractCampaignsData(content, campaignIds) {
+function extractCampaignsDataAdvanced(content, campaignIds) {
+  UTILS.log(`🔍 Auth: Улучшенный парсинг данных кампаний`);
+  
   const result = {};
   
-  // Поиск JSON данных в скриптах
-  const cheerio = Cheerio.load(content);
-  let campaignsData = null;
-  
-  cheerio('script').each((_, script) => {
-    const scriptContent = cheerio(script).html();
-    if (!scriptContent || !scriptContent.includes('window.__DATA__')) return;
-    
+  // Метод 1: Поиск window.__DATA__
+  const dataMatch = content.match(/window\.__DATA__\s*=\s*({.+?});/s);
+  if (dataMatch) {
+    UTILS.log(`🎯 Auth: Найден window.__DATA__`);
     try {
-      const match = scriptContent.match(/window\.__DATA__\s*=\s*({.+});/s);
-      if (match?.[1]) {
-        const data = JSON.parse(match[1]);
-        if (data.campaigns && Array.isArray(data.campaigns)) {
-          campaignsData = data.campaigns;
-          return false; // break
+      const data = JSON.parse(dataMatch[1]);
+      if (data.campaigns && Array.isArray(data.campaigns)) {
+        UTILS.log(`📊 Auth: Найдено ${data.campaigns.length} кампаний в window.__DATA__`);
+        return processCampaignsFromData(data.campaigns, campaignIds);
+      }
+    } catch (e) {
+      UTILS.log(`⚠️ Auth: Ошибка парсинга window.__DATA__: ${e.message}`);
+    }
+  }
+  
+  // Метод 2: Поиск в script тегах
+  const scriptMatches = content.match(/<script[^>]*>([\s\S]*?)<\/script>/gi);
+  if (scriptMatches) {
+    UTILS.log(`📋 Auth: Найдено ${scriptMatches.length} script тегов`);
+    
+    for (let i = 0; i < scriptMatches.length; i++) {
+      const scriptContent = scriptMatches[i].replace(/<\/?script[^>]*>/gi, '');
+      
+      // Поиск различных форматов JSON
+      const jsonPatterns = [
+        /\[\s*({[^{}]*"id"\s*:\s*\d+[^{}]*},?\s*)+\]/g,
+        /{\s*"\d+":\s*{[^{}]*},?\s*}/g,
+        /var\s+\w+\s*=\s*(\[\s*{[^]*}\s*\])/g,
+        /campaigns\s*:\s*(\[[^\]]+\])/g
+      ];
+      
+      for (const pattern of jsonPatterns) {
+        const matches = scriptContent.match(pattern);
+        if (matches) {
+          for (const match of matches) {
+            try {
+              let jsonStr = match.replace(/^(var\s+\w+\s*=\s*)/, '').replace(/^campaigns\s*:\s*/, '').replace(/;$/, '');
+              const parsed = JSON.parse(jsonStr);
+              
+              if (Array.isArray(parsed)) {
+                const foundData = processCampaignsFromData(parsed, campaignIds);
+                if (Object.keys(foundData).length > 0) {
+                  UTILS.log(`✅ Auth: Извлечены данные из script ${i + 1}`);
+                  return foundData;
+                }
+              }
+            } catch (e) {
+              // Продолжаем поиск
+            }
+          }
         }
       }
-    } catch (e) {}
-  });
+    }
+  }
   
-  if (!campaignsData) return result;
+  UTILS.log(`❌ Auth: Не найдены данные кампаний в JSON`);
+  return result;
+}
+
+function processCampaignsFromData(campaignsArray, campaignIds) {
+  const result = {};
+  let matchedCount = 0;
   
-  // Обработка найденных кампаний
-  for (const campaign of campaignsData) {
+  for (const campaign of campaignsArray) {
     if (!campaignIds.includes(String(campaign.id))) continue;
     
     const campaignId = String(campaign.id);
@@ -224,17 +440,53 @@ function extractCampaignsData(content, campaignIds) {
       dailyBudget: UTILS.parseNumber(campaign.daily_budget) || 0,
       source: UTILS.extractSource(campaign.title || '') || 'не изменено'
     };
+    matchedCount++;
   }
   
+  UTILS.log(`🎯 Auth: Сопоставлено ${matchedCount} кампаний с целевым списком`);
   return result;
 }
 
-function updateSheetsData(sheetNames, campaignsData, campaignSheetMap, spreadsheet) {
+function extractMinimalCampaignData(content, campaignIds) {
+  UTILS.log(`🔍 Auth: Минимальный парсинг данных кампаний`);
+  
+  const result = {};
+  
+  for (const id of campaignIds) {
+    // Поиск блока с кампанией по ID
+    const campaignRegex = new RegExp(`\\{[^\\}]*"id"\\s*:\\s*${id}[^\\}]*\\}`, 'i');
+    const campaignMatch = content.match(campaignRegex);
+    
+    if (campaignMatch) {
+      const campaignBlock = campaignMatch[0];
+      
+      // Извлечение названия
+      const titleMatch = campaignBlock.match(/"title"\s*:\s*"([^"]+)"/i);
+      if (titleMatch) {
+        const title = titleMatch[1];
+        result[id] = {
+          local: UTILS.extractLocale(title),
+          outOfBudget: campaignBlock.includes('"out_of_budget":true'),
+          pausedBy: '',
+          dailyBudget: 0,
+          source: UTILS.extractSource(title) || 'не изменено'
+        };
+      }
+    }
+  }
+  
+  UTILS.log(`📦 Auth: Минимальный парсинг - извлечено ${Object.keys(result).length} кампаний`);
+  return result;
+}
+
+function updateSheetsData(targetSheets, campaignsData, campaignSheetMap) {
+  UTILS.log(`📝 Auth: Начинаем обновление ${targetSheets.length} листов`);
+  
   let totalUpdates = 0;
   
-  for (const sheetName of sheetNames) {
-    const sheet = spreadsheet.getSheetByName(sheetName);
-    if (!sheet) continue;
+  for (const sheet of targetSheets) {
+    const sheetName = sheet.getName();
+    UTILS.log(`📄 Auth: Обрабатываем лист "${sheetName}"`);
     
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     const columnMap = {
@@ -245,7 +497,10 @@ function updateSheetsData(sheetNames, campaignsData, campaignSheetMap, spreadshe
       source: UTILS.findColumnIndex(headers, 'source')
     };
     
+    UTILS.log(`🔍 Auth: Лист "${sheetName}" - найдены колонки: ${Object.entries(columnMap).filter(([k,v]) => v !== -1).map(([k,v]) => `${k}:${v}`).join(', ')}`);
+    
     const updates = [];
+    let sheetUpdates = 0;
     
     for (const campaignId in campaignsData) {
       const sheetInfo = campaignSheetMap[campaignId];
@@ -264,14 +519,19 @@ function updateSheetsData(sheetNames, campaignsData, campaignSheetMap, spreadshe
             col: colIndex + 1,
             value: campaign[field]
           });
+          sheetUpdates++;
         }
       });
     }
     
     // Применение обновлений
-    UTILS.batchUpdate(sheet, updates);
-    totalUpdates += updates.length;
+    if (updates.length > 0) {
+      UTILS.batchUpdate(sheet, updates);
+    }
+    
+    totalUpdates += sheetUpdates;
+    UTILS.log(`✅ Auth: Лист "${sheetName}" - обновлено ${sheetUpdates} ячеек`);
   }
   
-  UTILS.log(`🎉 ИТОГО обновлено ${totalUpdates} ячеек в таблице`);
+  UTILS.log(`🎉 Auth: ИТОГО обновлено ${totalUpdates} ячеек в ${targetSheets.length} листах`);
 }

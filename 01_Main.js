@@ -23,7 +23,7 @@ function main() {
   
   try {
     if (!lock.tryLock(30000)) {
-      SpreadsheetApp.getActive().toast("Скрипт уже выполняется", "Ошибка", 10);
+      UTILS.safeToast("Скрипт уже выполняется", "Ошибка", 10);
       return { success: false, reason: 'already_running' };
     }
     
@@ -82,7 +82,7 @@ function main() {
     UTILS.status.update("COMPLETED", `${completed}/${functions.length} (${successRate}%) за ${executionTime.toFixed(1)}с`, statusColor);
     UTILS.log(`[${executionId}] ЗАВЕРШЕНО: ${completed}/${functions.length} (${successRate}%)`);
     
-    SpreadsheetApp.getActive().toast(`Обновление завершено: ${completed}/${functions.length} (${successRate}%)${failed > 0 ? `. Ошибок: ${failed}` : ''}`, "Готово", 10);
+    UTILS.safeToast(`Обновление завершено: ${completed}/${functions.length} (${successRate}%)${failed > 0 ? `. Ошибок: ${failed}` : ''}`, "Готово", 10);
     
     return {
       success: failed <= 3,
@@ -99,7 +99,7 @@ function main() {
     const errorMsg = `КРИТИЧЕСКАЯ ОШИБКА: ${error.message}`;
     UTILS.log(`[${executionId}] ${errorMsg}`);
     UTILS.status.update("ERROR", errorMsg, "#ffebee");
-    SpreadsheetApp.getActive().toast(errorMsg, "Критическая ошибка", 20);
+    UTILS.safeToast(errorMsg, "Критическая ошибка", 20);
     return { success: false, error: error.message, executionId };
     
   } finally {

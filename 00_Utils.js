@@ -10,7 +10,9 @@ const UTILS = {
     BASE_URL_APPODEAL: "https://app.appodeal.com/graphql",
     CACHE_EXPIRATION: 24 * 60 * 60,
     BATCH_SIZE: 50,
-    MAX_RETRIES: 3
+    MAX_RETRIES: 3,
+    // Целевые листы для обработки
+    TARGET_SHEETS: ["Planning", "Bundle Grouped Campaigns"]
   },
 
   // Логирование
@@ -63,6 +65,18 @@ const UTILS = {
     } catch (error) {
       UTILS.log(`Error getting sheet ${sheetName}: ${error.message}`);
       return null;
+    }
+  },
+
+  // Получение целевых листов для обработки
+  getTargetSheets: (spreadsheetId = null) => {
+    try {
+      const ssId = spreadsheetId || UTILS.CONFIG.SPREADSHEET_ID;
+      const ss = SpreadsheetApp.openById(ssId);
+      return UTILS.CONFIG.TARGET_SHEETS.map(sheetName => ss.getSheetByName(sheetName)).filter(sheet => sheet !== null);
+    } catch (error) {
+      UTILS.log(`Error getting target sheets: ${error.message}`);
+      return [];
     }
   },
 
@@ -266,6 +280,18 @@ const UTILS = {
       SpreadsheetApp.flush();
       Utilities.sleep(500);
     } catch (e) {}
+  },
+
+  // Безопасный toast
+  safeToast: (message, title = "Готово", timeout = 10) => {
+    try {
+      const spreadsheet = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
+      if (spreadsheet) {
+        spreadsheet.toast(message, title, timeout);
+      }
+    } catch (e) {
+      UTILS.log(`Toast error: ${e.message}. Message: ${message}`);
+    }
   }
 };
 

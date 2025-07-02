@@ -1,14 +1,25 @@
 // 09_IDManager.gs - Менеджер Campaign ID mappings
 function updateCampaignIdMappings() {
+  UTILS.log('🆔 IDManager: Начинаем updateCampaignIdMappings');
+  
   const spreadsheetData = getSpreadsheetCampaignData();
-  if (!spreadsheetData) return false;
+  if (!spreadsheetData) {
+    UTILS.log('❌ IDManager: Не удалось получить данные таблицы');
+    return false;
+  }
   
   const { sheet, data, campaignIdColIndex, internalIdColIndex } = spreadsheetData;
-  if (internalIdColIndex === -1) return false;
+  if (internalIdColIndex === -1) {
+    UTILS.log('❌ IDManager: Колонка Internal ID не найдена');
+    return false;
+  }
+  
+  UTILS.log(`📊 IDManager: Найдено ${data.length - 1} строк данных, колонка Internal ID: ${internalIdColIndex}`);
   
   const campaignIds = {};
   const cacheKeys = [];
   const currentInternalIds = {};
+  let validCampaignCount = 0;
   
   // Сбор данных из таблицы
   for (let i = 1; i < data.length; i++) {
@@ -20,11 +31,16 @@ function updateCampaignIdMappings() {
     if (internalId) currentInternalIds[campaignId] = internalId;
     
     cacheKeys.push(getCampaignCacheKey(campaignId));
+    validCampaignCount++;
   }
+  
+  UTILS.log(`🔍 IDManager: Найдено ${validCampaignCount} валидных Campaign ID`);
   
   // Проверка кеша
   const fullRefreshNeeded = needsFullRefresh();
   let campaignsToUpdate = Object.keys(campaignIds);
+  
+  UTILS.log(`🗃️ IDManager: Полное обновление ${fullRefreshNeeded ? 'требуется' : 'не требуется'}`);
   
   if (!fullRefreshNeeded) {
     const cachedMappings = UTILS.cache.getAll(cacheKeys);
@@ -36,17 +52,30 @@ function updateCampaignIdMappings() {
       return !currentInternalIds[campaignId] || 
              currentInternalIds[campaignId].toString() !== cachedInternalId;
     });
+    
+    const cachedCount = Object.keys(campaignIds).length - campaignsToUpdate.length;
+    UTILS.log(`💾 IDManager: В кеше найдено ${cachedCount} mappings, к обновлению: ${campaignsToUpdate.length}`);
   }
   
-  if (campaignsToUpdate.length === 0) return true;
+  if (campaignsToUpdate.length === 0) {
+    UTILS.log('✅ IDManager: Все mappings актуальны');
+    return true;
+  }
   
   // Получение данных через GraphQL
+  UTILS.log(`🌐 IDManager: Запрашиваем mappings через GraphQL для ${campaignsToUpdate.length} кампаний`);
   const mappings = fetchCampaignMappings();
-  if (!mappings) return false;
+  if (!mappings) {
+    UTILS.log('❌ IDManager: Не удалось получить mappings через GraphQL');
+    return false;
+  }
+  
+  UTILS.log(`📦 IDManager: Получено ${Object.keys(mappings).length} mappings из GraphQL`);
   
   // Применение обновлений
   const updates = [];
   const cacheUpdates = {};
+  let updatedCount = 0;
   
   Object.entries(mappings).forEach(([campaignId, internalId]) => {
     if (!campaignIds.hasOwnProperty(campaignId)) return;
@@ -60,36 +89,55 @@ function updateCampaignIdMappings() {
         col: internalIdColIndex + 1,
         value: internalId
       });
+      updatedCount++;
     }
     
     const cacheKey = getCampaignCacheKey(campaignId);
     cacheUpdates[cacheKey] = internalId.toString();
   });
   
+  UTILS.log(`📝 IDManager: Подготовлено ${updates.length} обновлений для таблицы`);
+  
   if (updates.length > 0) {
     UTILS.batchUpdate(sheet, updates);
+    UTILS.log(`✅ IDManager: Применено ${updates.length} обновлений в таблице`);
   }
   
   if (Object.keys(cacheUpdates).length > 0) {
     UTILS.cache.putAll(cacheUpdates);
     UTILS.cache.put("campaign_mapping_last_update", Date.now().toString());
+    UTILS.log(`💾 IDManager: Обновлен кеш для ${Object.keys(cacheUpdates).length} mappings`);
   }
   
+  UTILS.log('✅ IDManager: updateCampaignIdMappings завершен успешно');
   return true;
 }
 
 function getSpreadsheetCampaignData() {
+  UTILS.log('📊 IDManager: Получаем данные из листа Bundle Grouped Campaigns');
+  
   const sheet = UTILS.getSheet('Bundle Grouped Campaigns', UTILS.CONFIG.SPREADSHEET_ID);
-  if (!sheet) return null;
+  if (!sheet) {
+    UTILS.log('❌ IDManager: Лист Bundle Grouped Campaigns не найден');
+    return null;
+  }
   
   const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return null;
+  if (data.length <= 1) {
+    UTILS.log('❌ IDManager: Нет данных в листе');
+    return null;
+  }
   
   const headers = data[0];
   const campaignIdColIndex = UTILS.findColumnIndex(headers, ['campaign id', 'campaign id/link']);
   const internalIdColIndex = UTILS.findColumnIndex(headers, ['internal id']);
   
-  if (campaignIdColIndex === -1) return null;
+  UTILS.log(`🔍 IDManager: Найдены колонки - Campaign ID: ${campaignIdColIndex}, Internal ID: ${internalIdColIndex}`);
+  
+  if (campaignIdColIndex === -1) {
+    UTILS.log('❌ IDManager: Колонка Campaign ID не найдена');
+    return null;
+  }
   
   return { sheet, data, campaignIdColIndex, internalIdColIndex };
 }
@@ -100,15 +148,24 @@ function getCampaignCacheKey(campaignId) {
 
 function needsFullRefresh() {
   const lastUpdate = UTILS.cache.get("campaign_mapping_last_update");
-  if (!lastUpdate) return true;
+  if (!lastUpdate) {
+    UTILS.log('🕐 IDManager: Первое выполнение - требуется полное обновление');
+    return true;  
+  }
   
   const lastUpdateDate = new Date(parseInt(lastUpdate));
   const hoursSinceLastUpdate = (Date.now() - lastUpdateDate) / (1000 * 60 * 60);
-  return hoursSinceLastUpdate > 24;
+  const needsRefresh = hoursSinceLastUpdate > 24;
+  
+  UTILS.log(`🕐 IDManager: Последнее обновление ${hoursSinceLastUpdate.toFixed(1)} часов назад, полное обновление ${needsRefresh ? 'требуется' : 'не требуется'}`);
+  return needsRefresh;
 }
 
 function fetchCampaignMappings() {
+  UTILS.log('🌐 IDManager: Запрашиваем campaign mappings через GraphQL');
+  
   const dateRange = UTILS.getDateRange(10);
+  UTILS.log(`📅 IDManager: Период запроса - с ${dateRange.from} по ${dateRange.to}`);
   
   const payload = {
     operationName: "RichStats",
@@ -156,11 +213,19 @@ function fetchCampaignMappings() {
     payload: JSON.stringify(payload)
   });
   
-  if (!result.success) return null;
+  if (!result.success) {
+    UTILS.log(`❌ IDManager: Ошибка GraphQL запроса: ${result.error}`);
+    return null;
+  }
+  
+  UTILS.log('📡 IDManager: GraphQL запрос выполнен успешно');
   
   try {
     const jsonResponse = JSON.parse(result.response.getContentText());
-    if (jsonResponse.errors) return null;
+    if (jsonResponse.errors) {
+      UTILS.log(`❌ IDManager: GraphQL ошибки: ${JSON.stringify(jsonResponse.errors)}`);
+      return null;
+    }
     
     const mappings = {};
     const statsGroups = jsonResponse.data?.analytics?.richStats?.stats;
@@ -175,17 +240,22 @@ function fetchCampaignMappings() {
           }
         }
       });
+      
+      UTILS.log(`🎯 IDManager: Извлечено ${Object.keys(mappings).length} mappings из ответа GraphQL`);
+    } else {
+      UTILS.log('⚠️ IDManager: Неожиданный формат ответа GraphQL');
     }
     
     return mappings;
     
   } catch (error) {
-    UTILS.log(`Error parsing campaign mappings: ${error.message}`);
+    UTILS.log(`❌ IDManager: Ошибка парсинга ответа GraphQL: ${error.message}`);
     return null;
   }
 }
 
 // Wrapper функция для обратной совместимости
 function idlog() {
+  UTILS.log('🔄 IDManager: Запуск через idlog() wrapper');
   updateCampaignIdMappings();
 }

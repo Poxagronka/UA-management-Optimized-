@@ -1,20 +1,33 @@
-// 05_CampaignDataManager.gs - Объединенный менеджер данных кампаний
+// 04_CampaignDataManager.gs - Объединенный менеджер данных кампаний
 function updateCampaignDataInAllSheets() {
+  UTILS.log('📊 CampData: Начинаем updateCampaignDataInAllSheets');
+  
   const REQUIRED_HEADERS = ['Campaign ID/Link', 'Campaign Status', 'Optimization', 'Latest optimization value'];
   
-  const spreadsheet = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
-  const sheets = spreadsheet.getSheets();
+  const targetSheets = UTILS.getTargetSheets();
+  if (targetSheets.length === 0) {
+    UTILS.log('❌ CampData: Не найдены целевые листы');
+    return;
+  }
+  
+  UTILS.log(`📋 CampData: Обрабатываем ${targetSheets.length} целевых листов`);
   
   // Сначала обрабатываем Bundle Grouped Campaigns
-  const bundleSheet = sheets.find(s => s.getName() === "Bundle Grouped Campaigns");
-  if (bundleSheet) processSheetCampaignData(bundleSheet, true);
+  const bundleSheet = targetSheets.find(s => s.getName() === "Bundle Grouped Campaigns");
+  if (bundleSheet) {
+    UTILS.log('🎯 CampData: Обрабатываем Bundle Grouped Campaigns');
+    processSheetCampaignData(bundleSheet, true);
+  }
   
   // Затем остальные листы
-  sheets.forEach(sheet => {
+  targetSheets.forEach(sheet => {
     if (sheet.getName() !== "Bundle Grouped Campaigns") {
+      UTILS.log(`📄 CampData: Обрабатываем лист "${sheet.getName()}"`);
       processSheetCampaignData(sheet);
     }
   });
+  
+  UTILS.log('✅ CampData: updateCampaignDataInAllSheets завершен');
 
   function processSheetCampaignData(sheet, isBundleGrouped = false) {
     const data = sheet.getDataRange().getValues();
@@ -24,7 +37,10 @@ function updateCampaignDataInAllSheets() {
     const missingHeaders = REQUIRED_HEADERS.filter(header => 
       UTILS.findColumnIndex(headers, header.toLowerCase()) === -1
     );
-    if (missingHeaders.length > 0) return;
+    if (missingHeaders.length > 0) {
+      UTILS.log(`⚠️ CampData: Лист "${sheet.getName()}" пропущен - отсутствуют заголовки: ${missingHeaders.join(', ')}`);
+      return;
+    }
     
     const columnMap = {
       campaignId: UTILS.findColumnIndex(headers, ['campaign id/link']),
@@ -43,14 +59,32 @@ function updateCampaignDataInAllSheets() {
       }
     }
     
-    if (campaignIds.length === 0) return;
+    if (campaignIds.length === 0) {
+      UTILS.log(`⚠️ CampData: Лист "${sheet.getName()}" - нет валидных Campaign ID`);
+      return;
+    }
+    
+    UTILS.log(`🔍 CampData: Лист "${sheet.getName()}" - найдено ${campaignIds.length} кампаний для обработки`);
     
     // Пакетная обработка
     const batchSize = UTILS.CONFIG.BATCH_SIZE;
+    const totalBatches = Math.ceil(campaignIds.length / batchSize);
+    UTILS.log(`📦 CampData: Обрабатываем ${totalBatches} батчей по ${batchSize} кампаний`);
+    
+    let processedCount = 0;
     for (let i = 0; i < campaignIds.length; i += batchSize) {
       const batch = campaignIds.slice(i, i + batchSize);
+      const batchNum = Math.floor(i / batchSize) + 1;
+      
       processBatch(sheet, batch, columnMap);
+      processedCount += batch.length;
+      
+      if (batchNum % 2 === 0) {
+        UTILS.log(`⚡ CampData: Лист "${sheet.getName()}" - обработано ${processedCount}/${campaignIds.length} кампаний`);
+      }
     }
+    
+    UTILS.log(`✅ CampData: Лист "${sheet.getName()}" - обработка завершена`);
   }
   
   function processBatch(sheet, campaignBatch, columnMap) {
@@ -67,6 +101,7 @@ function updateCampaignDataInAllSheets() {
     try {
       const responses = UrlFetchApp.fetchAll(requests);
       const updates = [];
+      let successCount = 0;
       
       responses.forEach((response, index) => {
         if (response.getResponseCode() === 200) {
@@ -88,21 +123,29 @@ function updateCampaignDataInAllSheets() {
             if (columnMap.overallBudget !== -1 && campaign.budget !== undefined) {
               updates.push({ row: rowIndex, col: columnMap.overallBudget + 1, value: campaign.budget });
             }
+            successCount++;
           }
         }
       });
       
-      UTILS.batchUpdate(sheet, updates);
+      if (updates.length > 0) {
+        UTILS.batchUpdate(sheet, updates);
+      }
       
     } catch (error) {
-      UTILS.log(`Ошибка при обработке батча: ${error.message}`);
+      UTILS.log(`❌ CampData: Ошибка при обработке батча: ${error.message}`);
     }
   }
 }
 
 function getReportDataForAllSheets() {
-  const spreadsheet = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
-  const sheets = spreadsheet.getSheets();
+  UTILS.log('📈 Report: Начинаем getReportDataForAllSheets');
+  
+  const targetSheets = UTILS.getTargetSheets();
+  if (targetSheets.length === 0) {
+    UTILS.log('❌ Report: Не найдены целевые листы');
+    return;
+  }
   
   const dateRange = UTILS.getDateRange(13); // 14 дней назад
   const today = UTILS.formatDate(new Date());
@@ -120,6 +163,8 @@ function getReportDataForAllSheets() {
     },
     muteHttpExceptions: true
   };
+  
+  UTILS.log('📥 Report: Запрашиваем отчеты за 14 дней и сегодня');
   
   // Параллельный запрос отчетов
   const [data14d, todayData] = Object.values(REPORT_URLS).map(url => {
@@ -142,14 +187,20 @@ function getReportDataForAllSheets() {
     ...Object.keys(allCampaignData['today'])
   ]);
   
+  UTILS.log(`📊 Report: Агрегированы данные для ${allReportCampaignIds.size} кампаний`);
+  
   // Обработка каждого листа
-  sheets.forEach(sheet => {
+  let processedSheets = 0;
+  targetSheets.forEach(sheet => {
     try {
       processSheetReportData(sheet, allCampaignData, allReportCampaignIds);
+      processedSheets++;
     } catch (e) {
-      UTILS.log(`Ошибка обработки листа ${sheet.getName()}: ${e.message}`);
+      UTILS.log(`❌ Report: Ошибка обработки листа ${sheet.getName()}: ${e.message}`);
     }
   });
+  
+  UTILS.log(`✅ Report: Обработано ${processedSheets}/${targetSheets.length} листов`);
 
   function aggregateReportData(csvData) {
     if (!csvData?.length) return {};
@@ -206,6 +257,7 @@ function getReportDataForAllSheets() {
     if (columnMap.campaignId === -1) return;
     
     const updates = [];
+    let updatedRows = 0;
     
     for (let rowIndex = 1; rowIndex < allValues.length; rowIndex++) {
       const row = allValues[rowIndex];
@@ -246,8 +298,16 @@ function getReportDataForAllSheets() {
           updates.push({ row: rowIndex + 1, col: columnMap.todayCpi + 1, value: cpi.toFixed(2) });
         }
       }
+      
+      if (data14d || dataToday) updatedRows++;
     }
     
-    UTILS.batchUpdate(sheet, updates);
+    if (updates.length > 0) {
+      UTILS.batchUpdate(sheet, updates);
+    }
+    
+    if (updatedRows > 0) {
+      UTILS.log(`📄 Report: Лист "${sheet.getName()}" - обновлено ${updatedRows} строк`);
+    }
   }
 }

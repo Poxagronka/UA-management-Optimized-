@@ -1,4 +1,4 @@
-// 23_AutostopImpaired.gs - Автостоп Impaired кампаний
+// 13_AutostopImpaired.gs - Автостоп Impaired кампаний
 const IMPAIRED_CONFIG = {
   baseUrl: "https://app.appgrowth.com",
   username: "alexander.sakovich",
@@ -8,29 +8,50 @@ const IMPAIRED_CONFIG = {
 
 function loginAndSaveTrickyCampaigns() {
   const startTime = new Date();
+  UTILS.log('🎯 Impaired: Начинаем loginAndSaveTrickyCampaigns');
   
   const spreadsheet = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
-  if (!spreadsheet) return;
+  if (!spreadsheet) {
+    UTILS.log('❌ Impaired: Не удалось открыть таблицу');
+    return;
+  }
   
+  UTILS.log('🌐 Impaired: Получаем данные tricky кампаний');
   const campaignsData = fetchTrickyCampaignsData();
-  if (!campaignsData || campaignsData.length === 0) return;
+  if (!campaignsData || campaignsData.length === 0) {
+    UTILS.log('❌ Impaired: Не удалось получить данные кампаний');
+    return;
+  }
+  
+  UTILS.log(`📊 Impaired: Получено ${campaignsData.length} кампаний`);
   
   const trickyCampaigns = campaignsData.filter(campaign => {
     const title = String(campaign.title || "").toLowerCase();
     return title.includes("tricky");
   });
   
-  if (trickyCampaigns.length === 0) return;
+  UTILS.log(`🎯 Impaired: Найдено ${trickyCampaigns.length} tricky кампаний из ${campaignsData.length} общих`);
+  
+  if (trickyCampaigns.length === 0) {
+    UTILS.log('⚠️ Impaired: Нет tricky кампаний для обработки');
+    return;
+  }
   
   writeToAutostopSheet(spreadsheet, trickyCampaigns, campaignsData);
+  
   const executionTime = (new Date() - startTime) / 1000;
-  UTILS.log(`Autostop Impaired выполнен за ${executionTime.toFixed(2)} сек.`);
+  UTILS.log(`🏁 Impaired: Автостоп выполнен за ${executionTime.toFixed(2)} секунд`);
 }
 
 function fetchTrickyCampaignsData() {
+  UTILS.log(`🔐 Impaired: Начинаем аутентификацию (${IMPAIRED_CONFIG.maxAttempts} попыток)`);
+  
   for (let attempt = 0; attempt < IMPAIRED_CONFIG.maxAttempts; attempt++) {
     try {
+      UTILS.log(`🔄 Impaired: Попытка ${attempt + 1}/${IMPAIRED_CONFIG.maxAttempts}`);
+      
       // Получение страницы логина
+      UTILS.log('📥 Impaired: Получаем страницу логина');
       const loginPageRes = UrlFetchApp.fetch(`${IMPAIRED_CONFIG.baseUrl}/auth/`, {
         muteHttpExceptions: true,
         followRedirects: false,
@@ -38,38 +59,73 @@ function fetchTrickyCampaignsData() {
       });
       
       if (loginPageRes.getResponseCode() !== 200) {
+        UTILS.log(`❌ Impaired: Ошибка получения страницы логина: ${loginPageRes.getResponseCode()}`);
         throw new Error('Login page failed');
       }
       
       const loginPageText = loginPageRes.getContentText();
-      const cheerio = Cheerio.load(loginPageText);
-      const csrfToken = cheerio('input[name="csrf_token"]').val();
+      UTILS.log(`📄 Impaired: Получена страница логина (${loginPageText.length} символов)`);
       
-      if (!csrfToken) throw new Error('CSRF token not found');
+      // Извлечение CSRF токена
+      const csrfToken = extractCSRFToken(loginPageText);
+      if (!csrfToken) {
+        UTILS.log('❌ Impaired: CSRF токен не найден');
+        throw new Error('CSRF token not found');
+      }
+      
+      UTILS.log(`🔑 Impaired: CSRF токен получен: ${csrfToken.substring(0, 10)}...`);
       
       // Извлечение cookies
       const loginHeaders = loginPageRes.getAllHeaders();
       const initialCookies = extractCookies(loginHeaders["Set-Cookie"]);
+      UTILS.log('🍪 Impaired: Извлечены начальные cookies');
       
       // Выполнение логина
+      UTILS.log('🔐 Impaired: Выполняем логин');
       const loginResult = performLogin(csrfToken, initialCookies);
-      if (!loginResult.success) throw new Error('Login failed');
+      if (!loginResult.success) {
+        UTILS.log('❌ Impaired: Ошибка логина');
+        throw new Error('Login failed');
+      }
+      
+      UTILS.log('✅ Impaired: Авторизация успешна');
       
       // Получение страницы кампаний
+      UTILS.log('🌐 Impaired: Запрашиваем страницу кампаний');
       const campaignsData = fetchCampaignsPageData(loginResult.cookies);
       if (campaignsData && campaignsData.length > 0) {
+        UTILS.log(`📦 Impaired: Получено ${campaignsData.length} кампаний`);
         return campaignsData;
       }
       
+      UTILS.log('⚠️ Impaired: Получены пустые данные кампаний');
+      
     } catch (error) {
-      UTILS.log(`❌ Попытка ${attempt + 1} неудачна: ${error.message}`);
+      UTILS.log(`❌ Impaired: Попытка ${attempt + 1} неудачна: ${error.message}`);
       if (attempt < IMPAIRED_CONFIG.maxAttempts - 1) {
-        Utilities.sleep((attempt + 1) * 5000);
+        const sleepTime = (attempt + 1) * 5000;
+        UTILS.log(`⏱️ Impaired: Ожидание ${sleepTime}мс перед следующей попыткой`);
+        Utilities.sleep(sleepTime);
       }
     }
   }
   
+  UTILS.log(`❌ Impaired: Не удалось получить данные после ${IMPAIRED_CONFIG.maxAttempts} попыток`);
   return [];
+}
+
+function extractCSRFToken(html) {
+  // Поиск CSRF токена в HTML
+  let match = html.match(/name=["']csrf_token["']\s+value=["']([^"']+)["']/i);
+  if (match) return match[1];
+  
+  match = html.match(/value=["']([^"']+)["']\s+name=["']csrf_token["']/i);
+  if (match) return match[1];
+  
+  match = html.match(/<input[^>]+name=["']csrf_token["'][^>]+value=["']([^"']+)["']/i);
+  if (match) return match[1];
+  
+  return null;
 }
 
 function extractCookies(setCookieHeader) {
@@ -101,7 +157,12 @@ function performLogin(csrfToken, initialCookies) {
   };
   
   const loginRes = UrlFetchApp.fetch(`${IMPAIRED_CONFIG.baseUrl}/auth/`, loginOptions);
-  if (loginRes.getResponseCode() !== 302) {
+  const statusCode = loginRes.getResponseCode();
+  
+  UTILS.log(`🔐 Impaired: Ответ логина - статус: ${statusCode}`);
+  
+  if (statusCode !== 302) {
+    UTILS.log(`❌ Impaired: Ожидался редирект (302), получен ${statusCode}`);
     return { success: false };
   }
   
@@ -109,7 +170,10 @@ function performLogin(csrfToken, initialCookies) {
   const loginHeaders = loginRes.getAllHeaders();
   const loginCookies = loginHeaders["Set-Cookie"] || loginHeaders["set-cookie"];
   
-  if (!loginCookies) return { success: false };
+  if (!loginCookies) {
+    UTILS.log('❌ Impaired: Не получены cookies после логина');
+    return { success: false };
+  }
   
   let sessionCookie = "", rememberToken = "";
   const cookiesArray = Array.isArray(loginCookies) ? loginCookies : [loginCookies];
@@ -125,8 +189,12 @@ function performLogin(csrfToken, initialCookies) {
     }
   }
   
-  if (!sessionCookie || !rememberToken) return { success: false };
+  if (!sessionCookie || !rememberToken) {
+    UTILS.log(`❌ Impaired: Не найдены session cookies - session: ${!!sessionCookie}, remember: ${!!rememberToken}`);
+    return { success: false };
+  }
   
+  UTILS.log('🍪 Impaired: Получены session cookies');
   return { success: true, cookies: `${rememberToken}; ${sessionCookie}` };
 }
 
@@ -144,55 +212,98 @@ function fetchCampaignsPageData(cookies) {
   
   // Несколько попыток получения данных
   for (let i = 0; i < 3; i++) {
+    UTILS.log(`📡 Impaired: Запрос кампаний - попытка ${i + 1}/3`);
+    
     const url = `${IMPAIRED_CONFIG.baseUrl}/campaigns/?_nocache=${Date.now()}_${i}`;
     const response = UrlFetchApp.fetch(url, options);
     
     if (response.getResponseCode() === 200) {
       const content = response.getContentText();
+      UTILS.log(`📄 Impaired: Получен ответ (${content.length} символов)`);
+      
       const data = extractAllCampaignsData(content);
       
-      if (data && data.length > 0) return data;
+      if (data && data.length > 0) {
+        UTILS.log(`✅ Impaired: Извлечено ${data.length} кампаний из HTML`);
+        return data;
+      } else {
+        UTILS.log('⚠️ Impaired: Не найдены данные кампаний в ответе');
+      }
+    } else {
+      UTILS.log(`❌ Impaired: Ошибка запроса кампаний: ${response.getResponseCode()}`);
     }
     
-    Utilities.sleep(UTILS.randomDelay(1000, 2000));
+    if (i < 2) {
+      Utilities.sleep(UTILS.randomDelay(1000, 2000));
+    }
   }
   
   return [];
 }
 
 function extractAllCampaignsData(content) {
-  const cheerio = Cheerio.load(content);
+  UTILS.log('🔍 Impaired: Парсим данные кампаний из HTML');
+  
+  // Поиск данных в скриптах - упрощенная версия без внешних библиотек
   let campaignsData = null;
   
-  // Поиск данных в скриптах
-  cheerio('script').each((index, script) => {
-    const scriptContent = cheerio(script).html();
-    
-    if (scriptContent && scriptContent.includes('window.__DATA__')) {
-      try {
-        const dataMatch = scriptContent.match(/window\.__DATA__\s*=\s*({.+});/s);
-        if (dataMatch && dataMatch[1]) {
-          const data = JSON.parse(dataMatch[1]);
-          if (data.campaigns && Array.isArray(data.campaigns)) {
-            campaignsData = data.campaigns;
-            return false; // break
+  // Поиск window.__DATA__
+  const dataMatch = content.match(/window\.__DATA__\s*=\s*({.+?});/s);
+  if (dataMatch) {
+    try {
+      const data = JSON.parse(dataMatch[1]);
+      if (data.campaigns && Array.isArray(data.campaigns)) {
+        campaignsData = data.campaigns;
+        UTILS.log(`📊 Impaired: Найдено ${campaignsData.length} кампаний в window.__DATA__`);
+      }
+    } catch (e) {
+      UTILS.log(`⚠️ Impaired: Ошибка парсинга window.__DATA__: ${e.message}`);
+    }
+  }
+  
+  // Если не найдено в window.__DATA__, ищем в script тегах
+  if (!campaignsData) {
+    const scriptMatches = content.match(/<script[^>]*>([\s\S]*?)<\/script>/gi);
+    if (scriptMatches) {
+      UTILS.log(`📋 Impaired: Найдено ${scriptMatches.length} тегов script для поиска`);
+      
+      for (const script of scriptMatches) {
+        const scriptContent = script.replace(/<\/?script[^>]*>/gi, '');
+        if (!scriptContent.includes('campaigns')) continue;
+        
+        // Поиск массива кампаний
+        const campaignsMatch = scriptContent.match(/campaigns['"]\s*:\s*(\[[^\]]+\])/);
+        if (campaignsMatch) {
+          try {
+            campaignsData = JSON.parse(campaignsMatch[1]);
+            UTILS.log(`📊 Impaired: Найдено ${campaignsData.length} кампаний в script теге`);
+            break;
+          } catch (e) {
+            // Продолжаем поиск
           }
         }
-      } catch (e) {
-        // Игнорируем ошибки парсинга
       }
     }
-  });
+  }
+  
+  if (!campaignsData) {
+    UTILS.log('❌ Impaired: Не найдены данные кампаний в JSON');
+  }
   
   return campaignsData || [];
 }
 
 function writeToAutostopSheet(spreadsheet, trickyCampaignsData, allCampaignsData) {
+  UTILS.log(`📝 Impaired: Записываем данные в лист Autostop_Impaired`);
+  
   const sheetName = "Autostop_Impaired";
   
   let sheet = spreadsheet.getSheetByName(sheetName);
   if (!sheet) {
+    UTILS.log(`📄 Impaired: Создаем новый лист ${sheetName}`);
     sheet = spreadsheet.insertSheet(sheetName);
+  } else {
+    UTILS.log(`📄 Impaired: Используем существующий лист ${sheetName}`);
   }
   
   const headers = ["ID", "Impaired ID", "Title", "Impaired Title", "BI URL", "Last Updated"];
@@ -205,6 +316,7 @@ function writeToAutostopSheet(spreadsheet, trickyCampaignsData, allCampaignsData
       const values = dataRange.getDisplayValues();
       const backgrounds = dataRange.getBackgrounds();
       
+      let existingCount = 0;
       for (let i = 0; i < values.length; i++) {
         const campaignId = extractIdFromCell(values[i][0]);
         const impairedId = extractIdFromCell(values[i][1]);
@@ -215,10 +327,13 @@ function writeToAutostopSheet(spreadsheet, trickyCampaignsData, allCampaignsData
             wasActive: wasActive,
             impairedId: impairedId || ""
           };
+          existingCount++;
         }
       }
+      
+      UTILS.log(`📊 Impaired: Найдено ${existingCount} существующих записей`);
     } catch (e) {
-      // Игнорируем ошибки чтения
+      UTILS.log(`⚠️ Impaired: Ошибка чтения существующих данных: ${e.message}`);
     }
   }
   
@@ -238,7 +353,10 @@ function writeToAutostopSheet(spreadsheet, trickyCampaignsData, allCampaignsData
     }
   }
   
+  UTILS.log(`🎯 Impaired: Найдено ${allImpairedCampaigns.length} impaired кампаний`);
+  
   // Поиск связей между кампаниями
+  let linkedCount = 0;
   for (const impairedCampaign of allImpairedCampaigns) {
     const relatedMatch = impairedCampaign.title.match(/related\s*=\s*(\d+)/i);
     if (relatedMatch && relatedMatch[1]) {
@@ -246,9 +364,12 @@ function writeToAutostopSheet(spreadsheet, trickyCampaignsData, allCampaignsData
       const trickyCampaign = trickyCampaignsData.find(c => String(c.id) === relatedId);
       if (trickyCampaign) {
         impairedCampaignsMap[relatedId] = impairedCampaign.id;
+        linkedCount++;
       }
     }
   }
+  
+  UTILS.log(`🔗 Impaired: Найдено ${linkedCount} связей между tricky и impaired кампаниями`);
   
   // Подготовка финальных данных
   const currentTime = new Date();
@@ -319,6 +440,9 @@ function writeToAutostopSheet(spreadsheet, trickyCampaignsData, allCampaignsData
     }
   }
   
+  UTILS.log(`📊 Impaired: Статистика данных - Активных: ${trickyCampaignsData.length}, Остановленных: ${Object.keys(existingCampaignStatuses).length - currentActiveCampaignIds.size}`);
+  UTILS.log(`🎯 Impaired: К остановке: ${campaignsToStop.length}, К запуску: ${campaignsToStart.length}`);
+  
   // Очистка и запись новых данных
   sheet.clear();
   
@@ -337,6 +461,7 @@ function writeToAutostopSheet(spreadsheet, trickyCampaignsData, allCampaignsData
     dataRange.setValues(dataValues);
     
     // Применение фонов и ссылок
+    let appliedLinks = 0;
     for (let i = 0; i < finalData.length; i++) {
       const row = finalData[i];
       const rowIndex = i + 2;
@@ -350,11 +475,13 @@ function writeToAutostopSheet(spreadsheet, trickyCampaignsData, allCampaignsData
       if (row.campaignId) {
         const campaignLink = UTILS.createHyperlink(row.campaignId, `${IMPAIRED_CONFIG.baseUrl}/campaigns/${row.campaignId}`);
         sheet.getRange(rowIndex, 1).setRichTextValue(campaignLink);
+        appliedLinks++;
       }
       
       if (row.impairedId) {
         const impairedLink = UTILS.createHyperlink(row.impairedId, `${IMPAIRED_CONFIG.baseUrl}/campaigns/${row.impairedId}`);
         sheet.getRange(rowIndex, 2).setRichTextValue(impairedLink);
+        appliedLinks++;
       }
     }
     
@@ -363,16 +490,22 @@ function writeToAutostopSheet(spreadsheet, trickyCampaignsData, allCampaignsData
     timeColumn.setNumberFormat("yyyy-mm-dd hh:mm:ss");
     
     sheet.autoResizeColumns(1, headers.length);
+    
+    UTILS.log(`📝 Impaired: Записано ${finalData.length} строк данных, создано ${appliedLinks} гиперссылок`);
   }
   
   // Обновление статусов кампаний
   if (campaignsToStop.length > 0) {
+    UTILS.log(`🛑 Impaired: Останавливаем ${campaignsToStop.length} impaired кампаний`);
     updateImpairedCampaignsStatus(campaignsToStop, false);
   }
   
   if (campaignsToStart.length > 0) {
+    UTILS.log(`🔄 Impaired: Запускаем ${campaignsToStart.length} impaired кампаний`);
     updateImpairedCampaignsStatus(campaignsToStart, true);
   }
+  
+  UTILS.log('✅ Impaired: Запись в лист Autostop_Impaired завершена');
 }
 
 function extractIdFromCell(cellValue) {
@@ -388,11 +521,19 @@ function extractIdFromCell(cellValue) {
 }
 
 function updateImpairedCampaignsStatus(campaignIds, active) {
+  UTILS.log(`🔧 Impaired: Обновляем статус ${campaignIds.length} кампаний (active: ${active})`);
+  
   const batchSize = 10;
   const maxRetries = 3;
+  let successCount = 0;
+  let errorCount = 0;
   
   for (let i = 0; i < campaignIds.length; i += batchSize) {
     const batch = campaignIds.slice(i, i + batchSize);
+    const batchNum = Math.floor(i / batchSize) + 1;
+    const totalBatches = Math.ceil(campaignIds.length / batchSize);
+    
+    UTILS.log(`⚡ Impaired: Обрабатываем батч ${batchNum}/${totalBatches} (${batch.length} кампаний)`);
     
     for (const campaignId of batch) {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -408,10 +549,16 @@ function updateImpairedCampaignsStatus(campaignIds, active) {
           }
         );
         
-        if (result.success) break;
-        
-        if (attempt < maxRetries) {
-          Utilities.sleep(1000 * attempt);
+        if (result.success) {
+          successCount++;
+          break;
+        } else {
+          if (attempt < maxRetries) {
+            Utilities.sleep(1000 * attempt);
+          } else {
+            errorCount++;
+            UTILS.log(`❌ Impaired: Не удалось обновить кампанию ${campaignId} после ${maxRetries} попыток`);
+          }
         }
       }
     }
@@ -420,9 +567,13 @@ function updateImpairedCampaignsStatus(campaignIds, active) {
       Utilities.sleep(500);
     }
   }
+  
+  UTILS.log(`📊 Impaired: Обновление статусов завершено - Успешно: ${successCount}, Ошибок: ${errorCount}`);
 }
 
 function toggleTrickyTrackerTrigger() {
+  UTILS.log('🔄 Impaired: Переключаем триггер автоматического выполнения');
+  
   const triggerName = "loginAndSaveTrickyCampaigns";
   const triggers = ScriptApp.getProjectTriggers();
   
@@ -436,6 +587,7 @@ function toggleTrickyTrackerTrigger() {
   
   if (existingTrigger) {
     ScriptApp.deleteTrigger(existingTrigger);
+    UTILS.log('❌ Impaired: Автоматическое выполнение отключено');
     return {
       status: "removed",
       message: "Автоматическое выполнение отключено"
@@ -446,6 +598,7 @@ function toggleTrickyTrackerTrigger() {
       .everyHours(2)
       .create();
     
+    UTILS.log('✅ Impaired: Автоматическое выполнение включено (каждые 2 часа)');
     return {
       status: "created",
       message: "Автоматическое выполнение включено (каждые 2 часа)"

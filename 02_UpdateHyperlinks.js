@@ -1,26 +1,52 @@
 // 02_UpdateHyperlinks.gs - Упрощенная версия
 function updateHyperlinks() {
+  UTILS.log('🔗 Hyperlinks: Начинаем updateHyperlinks');
+  
   try {
-    const spreadsheet = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
-    const sheets = spreadsheet.getSheets();
+    const targetSheets = UTILS.getTargetSheets();
+    if (targetSheets.length === 0) {
+      UTILS.log('❌ Hyperlinks: Не найдены целевые листы');
+      return;
+    }
     
-    sheets.forEach(sheet => {
+    UTILS.log(`📊 Hyperlinks: Найдено ${targetSheets.length} целевых листов для обработки`);
+    
+    let processedSheets = 0;
+    let totalUpdates = 0;
+    
+    targetSheets.forEach(sheet => {
       if (!sheet.isSheetHidden()) {
-        processSheetHyperlinks(sheet);
+        const updates = processSheetHyperlinks(sheet);
+        totalUpdates += updates;
+        processedSheets++;
+      } else {
+        UTILS.log(`⏭️ Hyperlinks: Пропущен скрытый лист "${sheet.getName()}"`);
       }
     });
+    
+    UTILS.log(`🎉 Hyperlinks: Завершено - обработано ${processedSheets} листов, всего обновлений: ${totalUpdates}`);
+    
   } catch (e) {
+    UTILS.log(`❌ Hyperlinks: Критическая ошибка - ${e.message}`);
     UTILS.handleError(e, 'updateHyperlinks');
   }
 }
 
 function processSheetHyperlinks(sheet) {
+  const sheetName = sheet.getName();
+  UTILS.log(`📄 Hyperlinks: Обрабатываем лист "${sheetName}"`);
+  
   try {
     const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return;
+    if (lastRow < 2) {
+      UTILS.log(`⚠️ Hyperlinks: Лист "${sheetName}" не содержит данных (строк: ${lastRow})`);
+      return 0;
+    }
     
     const allData = sheet.getRange(1, 1, lastRow, sheet.getLastColumn()).getValues();
     const headers = allData[0];
+    
+    UTILS.log(`📊 Hyperlinks: Лист "${sheetName}" - ${lastRow - 1} строк данных, ${headers.length} колонок`);
     
     // Создание карты колонок
     const columnMap = {
@@ -32,28 +58,50 @@ function processSheetHyperlinks(sheet) {
       edit: UTILS.findColumnIndex(headers, ['edit'])
     };
     
-    if (Object.values(columnMap).every(idx => idx === -1)) {
-      UTILS.log(`Лист '${sheet.getName()}' не содержит необходимых столбцов`);
-      return;
+    // Проверяем найденные колонки
+    const foundColumns = Object.entries(columnMap).filter(([key, idx]) => idx !== -1);
+    if (foundColumns.length === 0) {
+      UTILS.log(`⚠️ Hyperlinks: Лист "${sheetName}" не содержит необходимых столбцов`);
+      return 0;
     }
     
+    UTILS.log(`🔍 Hyperlinks: Лист "${sheetName}" - найдены колонки: ${foundColumns.map(([key, idx]) => `${key}:${idx}`).join(', ')}`);
+    
     // Подготовка всех обновлений
-    const updates = prepareHyperlinkUpdates(allData.slice(1), columnMap);
+    const updates = prepareHyperlinkUpdates(allData.slice(1), columnMap, sheetName);
+    
+    if (updates.length === 0) {
+      UTILS.log(`⚠️ Hyperlinks: Лист "${sheetName}" - нет обновлений для применения`);
+      return 0;
+    }
     
     // Применение обновлений
     UTILS.batchUpdate(sheet, updates);
     
+    UTILS.log(`✅ Hyperlinks: Лист "${sheetName}" - применено ${updates.length} обновлений`);
+    return updates.length;
+    
   } catch (e) {
-    UTILS.log(`Ошибка в листе ${sheet.getName()}: ${e.message}`);
+    UTILS.log(`❌ Hyperlinks: Ошибка в листе "${sheetName}": ${e.message}`);
+    return 0;
   }
 }
 
-function prepareHyperlinkUpdates(dataRows, columnMap) {
+function prepareHyperlinkUpdates(dataRows, columnMap, sheetName) {
+  UTILS.log(`🔧 Hyperlinks: Подготавливаем обновления для ${dataRows.length} строк в листе "${sheetName}"`);
+  
   const updates = [];
   const idRegex = /^\d+$/;
   
+  let campaignLinks = 0, creativesLinks = 0, mainCampaignLinks = 0, editLinks = 0;
+  let cpiUpdates = 0, budgetUpdates = 0;
+  let skippedRows = 0;
+  
   dataRows.forEach((row, rowIndex) => {
-    if (!row || !Array.isArray(row)) return;
+    if (!row || !Array.isArray(row)) {
+      skippedRows++;
+      return;
+    }
     
     const actualRowIndex = rowIndex + 2; // +2 так как начинаем со строки 2
     
@@ -67,6 +115,7 @@ function prepareHyperlinkUpdates(dataRows, columnMap) {
           richText: UTILS.createHyperlink(String(campaignId).trim(), 
             `${UTILS.CONFIG.BASE_URL_APPGROWTH}/campaigns/${campaignId}`)
         });
+        campaignLinks++;
       }
     }
     
@@ -79,6 +128,7 @@ function prepareHyperlinkUpdates(dataRows, columnMap) {
           col: columnMap.creativesId + 1,
           richText: creativesUpdate
         });
+        creativesLinks++;
       }
     }
     
@@ -92,6 +142,7 @@ function prepareHyperlinkUpdates(dataRows, columnMap) {
           richText: UTILS.createHyperlink(String(mainCampaignId).trim(),
             `${UTILS.CONFIG.BASE_URL_APPGROWTH}/campaigns/${mainCampaignId}`)
         });
+        mainCampaignLinks++;
       }
     }
     
@@ -105,6 +156,7 @@ function prepareHyperlinkUpdates(dataRows, columnMap) {
           richText: UTILS.createHyperlink("edit",
             `${UTILS.CONFIG.BASE_URL_APPGROWTH}/campaigns/${editCampaignId}/edit`)
         });
+        editLinks++;
       }
     }
     
@@ -117,6 +169,7 @@ function prepareHyperlinkUpdates(dataRows, columnMap) {
         col: columnMap.todayCPI + 1,
         value: displayText
       });
+      cpiUpdates++;
     }
     
     // Out of Budget formatting
@@ -137,6 +190,7 @@ function prepareHyperlinkUpdates(dataRows, columnMap) {
           col: columnMap.outOfBudget + 1,
           richText: richText
         });
+        budgetUpdates++;
       } else {
         const budgetText = budgetValue === false ? "False" : (budgetValue ? String(budgetValue) : "");
         updates.push({
@@ -144,27 +198,53 @@ function prepareHyperlinkUpdates(dataRows, columnMap) {
           col: columnMap.outOfBudget + 1,
           value: budgetText
         });
+        budgetUpdates++;
       }
     }
   });
   
+  // Логируем статистику по типам обновлений
+  const updateStats = [];
+  if (campaignLinks > 0) updateStats.push(`Campaign ID: ${campaignLinks}`);
+  if (creativesLinks > 0) updateStats.push(`Creatives: ${creativesLinks}`);
+  if (mainCampaignLinks > 0) updateStats.push(`Main Campaign: ${mainCampaignLinks}`);
+  if (editLinks > 0) updateStats.push(`Edit: ${editLinks}`);
+  if (cpiUpdates > 0) updateStats.push(`CPI: ${cpiUpdates}`);
+  if (budgetUpdates > 0) updateStats.push(`Budget: ${budgetUpdates}`);
+  
+  if (updateStats.length > 0) {
+    UTILS.log(`📊 Hyperlinks: "${sheetName}" - типы обновлений: ${updateStats.join(', ')}`);
+  }
+  
+  if (skippedRows > 0) {
+    UTILS.log(`⚠️ Hyperlinks: "${sheetName}" - пропущено ${skippedRows} невалидных строк`);
+  }
+  
+  UTILS.log(`✅ Hyperlinks: "${sheetName}" - подготовлено ${updates.length} обновлений`);
   return updates;
 }
 
 function isValidId(value, regex) {
   if (value === null || value === undefined || value === "") return false;
   const strValue = String(value).trim();
-  return regex.test(strValue) && strValue.length > 0;
+  const isValid = regex.test(strValue) && strValue.length > 0;
+  return isValid;
 }
 
 function createCreativesLinks(value, idRegex) {
   if (!value) return null;
   
-  const validIds = String(value).split(",")
-    .map(id => id.trim())
-    .filter(id => idRegex.test(id));
+  const rawIds = String(value).split(",").map(id => id.trim());
+  const validIds = rawIds.filter(id => idRegex.test(id));
   
-  if (validIds.length === 0) return null;
+  if (validIds.length === 0) {
+    UTILS.log(`⚠️ Hyperlinks: Не найдены валидные Creatives ID в "${value}"`);
+    return null;
+  }
+  
+  if (validIds.length !== rawIds.length) {
+    UTILS.log(`⚠️ Hyperlinks: Из ${rawIds.length} Creatives ID валидны только ${validIds.length}: ${validIds.join(', ')}`);
+  }
   
   const displayText = validIds.join(", ");
   const builder = SpreadsheetApp.newRichTextValue().setText(displayText);

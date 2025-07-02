@@ -14,14 +14,19 @@ function createPatchManager() {
     run: () => {
       try {
         UTILS.log("🔧 PatchOptimization: Начинаем обработку");
-        const spreadsheet = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
-        const sheets = spreadsheet.getSheets();
-        UTILS.log(`📊 PatchOptimization: Найдено ${sheets.length} листов для обработки`);
+        
+        const targetSheets = UTILS.getTargetSheets();
+        if (targetSheets.length === 0) {
+          UTILS.log("❌ PatchOptimization: Не найдены целевые листы");
+          return { success: false, error: "No target sheets found" };
+        }
+        
+        UTILS.log(`📊 PatchOptimization: Найдено ${targetSheets.length} целевых листов для обработки`);
         
         let allRequests = [];
-        for (let i = 0; i < sheets.length; i++) {
-          const sheet = sheets[i];
-          UTILS.log(`📋 PatchOptimization: Обрабатываем лист "${sheet.getName()}" (${i + 1}/${sheets.length})`);
+        for (let i = 0; i < targetSheets.length; i++) {
+          const sheet = targetSheets[i];
+          UTILS.log(`📋 PatchOptimization: Обрабатываем лист "${sheet.getName()}" (${i + 1}/${targetSheets.length})`);
           const sheetRequests = processSheet(sheet);
           allRequests = allRequests.concat(sheetRequests);
           UTILS.log(`📋 PatchOptimization: Лист "${sheet.getName()}" - найдено ${sheetRequests.length} запросов`);
@@ -57,13 +62,10 @@ function createPatchManager() {
 
   function processSheet(sheet) {
     const sheetName = sheet.getName();
-    UTILS.log(`🔍 PatchOptimization: Анализируем лист "${sheetName}"`);
     
     const data = sheet.getDataRange().getValues();
     const backgrounds = sheet.getDataRange().getBackgrounds();
     const headers = data[0];
-    
-    UTILS.log(`📊 PatchOptimization: Лист "${sheetName}" - ${data.length - 1} строк данных`);
     
     // Поиск необходимых колонок
     const columnMap = {
@@ -72,8 +74,6 @@ function createPatchManager() {
       optimization: UTILS.findColumnIndex(headers, ['latest optimization value', 'optimization value', 'optimization']),
       dailyBudget: UTILS.findColumnIndex(headers, ['daily budget', 'budget'])
     };
-    
-    UTILS.log(`🔎 PatchOptimization: Колонки в "${sheetName}" - Campaign ID: ${columnMap.campaignId}, Status: ${columnMap.status}, Opt: ${columnMap.optimization}, Budget: ${columnMap.dailyBudget}`);
     
     // Проверка наличия необходимых колонок
     const missingColumns = Object.entries(columnMap).filter(([key, idx]) => idx === -1).map(([key]) => key);
@@ -122,15 +122,12 @@ function createPatchManager() {
       });
     }
     
-    UTILS.log(`📈 PatchOptimization: Лист "${sheetName}" - валидных кампаний: ${validCampaigns}, пропущено по фону: ${skippedByBackground}, по невалидному ID: ${skippedByInvalidId}`);
-    
     if (validCampaigns === 0) {
       UTILS.log(`⚠️ PatchOptimization: Лист "${sheetName}" - нет валидных кампаний для обработки`);
       return [];
     }
     
     // Проверка кеша
-    UTILS.log(`🗃️ PatchOptimization: Лист "${sheetName}" - проверяем кеш для ${cacheKeys.length} кампаний`);
     const cachedValues = UTILS.cache.getAll(cacheKeys);
     let cachedCount = 0;
     
@@ -165,7 +162,10 @@ function createPatchManager() {
       });
     }
     
-    UTILS.log(`💾 PatchOptimization: Лист "${sheetName}" - найдено в кеше: ${cachedCount}, новых запросов: ${requests.length}`);
+    if (cachedCount > 0) {
+      UTILS.log(`💾 PatchOptimization: Лист "${sheetName}" - найдено в кеше: ${cachedCount}, новых запросов: ${requests.length}`);
+    }
+    
     return requests;
   }
 
@@ -206,7 +206,6 @@ function createPatchManager() {
 
   function executeBatchRequests(requests) {
     if (requests.length === 0) {
-      UTILS.log("🔄 PatchOptimization: Нет запросов для выполнения");
       return { processed: 0, updated: 0, errors: 0 };
     }
 
@@ -248,7 +247,9 @@ function createPatchManager() {
         } else {
           batchErrors++;
           totalErrors++;
-          UTILS.log(`❌ PatchOptimization: Ошибка для кампании ${request.campaignId}: ${result.error}`);
+          if (batchErrors <= 3) { // Логируем только первые 3 ошибки на батч
+            UTILS.log(`❌ PatchOptimization: Ошибка для кампании ${request.campaignId}: ${result.error}`);
+          }
         }
         
         // Лог прогресса каждые 10 запросов в батче
@@ -261,7 +262,6 @@ function createPatchManager() {
       
       // Пауза между батчами
       if (i + batchSize < requests.length) {
-        UTILS.log(`⏱️ PatchOptimization: Пауза 500мс перед следующим батчем`);
         Utilities.sleep(500);
       }
     }
