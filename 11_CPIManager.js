@@ -16,7 +16,6 @@ function checkHighCPI() {
   const columnMap = {
     cpi: UTILS.findColumnIndex(headers, ['today cpi', 'cpi today']),
     limit: UTILS.findColumnIndex(headers, ['limit cpi', 'cpi limit', 'limit сpi']),
-    local: UTILS.findColumnIndex(headers, ['local', 'country', 'geo']),
     eroas: UTILS.findColumnIndex(headers, ['eroas d365']),
     isAutomated: UTILS.findColumnIndex(headers, ['is automated', 'automated'])
   };
@@ -24,13 +23,13 @@ function checkHighCPI() {
   const foundColumns = Object.entries(columnMap).filter(([key, idx]) => idx !== -1);
   UTILS.log(`🔍 CPI: Найдены колонки: ${foundColumns.map(([key, idx]) => `${key}:${idx}`).join(', ')}`);
   
-  if (columnMap.cpi === -1 || columnMap.local === -1) {
-    UTILS.log('❌ CPI: Не найдены обязательные колонки CPI или Local');
+  if (columnMap.cpi === -1) {
+    UTILS.log('❌ CPI: Не найдена колонка CPI');
     return;
   }
 
   const colors = [], weights = [], eroasColors = [], eroasWeights = [];
-  const blackColor = '#000000', redColor = '#EF5350', blueColor = '#4169E1';
+  const blackColor = '#000000', blueColor = '#4169E1', redColor = '#EF5350';
   
   // Инициализация массивов
   for (let i = 0; i < data.length - 1; i++) {
@@ -42,7 +41,7 @@ function checkHighCPI() {
     }
   }
   
-  let cpiHighCount = 0, cpiLimitCount = 0, eroasLowCount = 0, automatedSkipped = 0;
+  let cpiLimitCount = 0, eroasLowCount = 0, automatedSkipped = 0;
   
   // Обработка каждой строки
   for (let i = 1; i < data.length; i++) {
@@ -52,24 +51,15 @@ function checkHighCPI() {
     try {
       const cpiVal = UTILS.parseNumber(row[columnMap.cpi]) || 0;
       const limitVal = columnMap.limit !== -1 ? UTILS.parseNumber(row[columnMap.limit]) : null;
-      const country = columnMap.local !== -1 ? String(row[columnMap.local]).trim() : '';
       const isAutomated = columnMap.isAutomated !== -1 ? 
         String(row[columnMap.isAutomated]).trim().toUpperCase() === 'TRUE' : false;
       
-      const tier = getCountryTier(country);
-      
       if (!isAutomated) {
+        // Проверка только превышения лимита
         if (limitVal !== null && !isNaN(limitVal) && cpiVal > limitVal) {
           colors[arrayIndex] = blueColor;
           weights[arrayIndex] = 'bold';
           cpiLimitCount++;
-        } else {
-          const threshold = getCPIThresholdByCountryTier(tier);
-          if (cpiVal > threshold) {
-            colors[arrayIndex] = redColor;
-            weights[arrayIndex] = 'bold';
-            cpiHighCount++;
-          }
         }
       } else {
         automatedSkipped++;
@@ -106,7 +96,6 @@ function checkHighCPI() {
   
   // Итоговая статистика
   const stats = [];
-  if (cpiHighCount > 0) stats.push(`CPI высокий: ${cpiHighCount}`);
   if (cpiLimitCount > 0) stats.push(`CPI превышает лимит: ${cpiLimitCount}`);
   if (eroasLowCount > 0) stats.push(`eROAS низкий: ${eroasLowCount}`);
   if (automatedSkipped > 0) stats.push(`Автоматических пропущено: ${automatedSkipped}`);
@@ -170,36 +159,4 @@ function runMaxCPICalculation() {
   }
   
   UTILS.log('✅ CPI: runMaxCPICalculation завершен');
-}
-
-function getCountryTier(countryCode) {
-  if (!countryCode) return 4;
-  
-  let code = String(countryCode).trim().toUpperCase();
-  
-  // Маппинг двухбуквенных кодов в трёхбуквенные
-  const codeMap = {
-    'CA': 'CAN', 'AU': 'AUS', 'KR': 'KOR', 'BR': 'BRA', 
-    'MX': 'MEX', 'TH': 'THA', 'TW': 'TWN', 'NZ': 'NZL', 
-    'VN': 'VNM', 'HK': 'HKG', 'JP': 'JPN'
-  };
-  
-  if (codeMap[code]) code = codeMap[code];
-  
-  if (code === 'USA') return 1;
-  if (['CAN', 'GBR', 'AUS', 'DEU'].includes(code)) return 2;
-  if (['JPN', 'KOR', 'FRA', 'ITA', 'ESP', 'NZL', 'SGP', 'NOR', 'SWE', 'DNK', 'FIN'].includes(code)) return 3;
-  
-  return 4;
-}
-
-function getCPIThresholdByCountryTier(tier) {
-  const thresholds = {
-    1: 1.9,   // США
-    2: 1.0,   // Tier 2 страны
-    3: 0.5,   // Tier 3 страны
-    4: 0.15   // Остальные страны
-  };
-  
-  return thresholds[tier] || 0.15;
 }
