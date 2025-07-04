@@ -10,9 +10,6 @@ function onOpen() {
     .addItem('Получить отчет Reporting API', 'getReportDataForAllSheets')
     .addItem('Патч Campaign Optimization', 'runPatchCampaignOptimization')
     .addItem('Create source hyperlinks', 'createSourceLinksInPlanning')
-    .addSeparator()
-    .addItem('Pivot-report', 'createCampaignPivotReport')
-    .addItem('Clear Pivot', 'clearAllData')
     .addToUi();
 }
 
