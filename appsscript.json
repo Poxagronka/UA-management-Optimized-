@@ -1,7 +1,50 @@
 {
   "timeZone": "Europe/Warsaw",
-  "dependencies": {
-  },
   "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8"
+  "runtimeVersion": "V8",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      {
+        "userSymbol": "Sheets",
+        "serviceId": "sheets",
+        "version": "v4"
+      }
+    ],
+    "libraries": [
+      {
+        "userSymbol": "Cheerio",
+        "libraryId": "1ReeQ6WO8kKNxoaA_O0XEQ589cIrRvEBA9qcWpNqdOP17i47u6N9M5Xh0",
+        "version": "16"
+      },
+      {
+        "userSymbol": "FetchApp",
+        "libraryId": "1EbLSESpiGkI3PYmJqWh3-rmLkYKAtCNPi1L2YCtMgo2Ut8xMThfJ41Ex",
+        "version": "134"
+      },
+      {
+        "userSymbol": "BatchRequest",
+        "libraryId": "1HLv6tWz0oXFOJHerBTP8HsNmhpRqssijJatC92bv9Ym6HSN69_UuzcDk",
+        "version": "10"
+      },
+      {
+        "userSymbol": "BBLog",
+        "libraryId": "1kzzYZhgODZluRmjsjh7t3O-ftmFAF9h1jaRHU0rOdf9irF0VUiJW33Kt",
+        "version": "22"
+      },
+      {
+        "userSymbol": "LodashGS",
+        "version": "6",
+        "libraryId": "1SQ0PlSMwndIuOAgtVJdjxsuXueECtY9OGejVDS37ckSVbMll73EXf2PW"
+      },
+      {
+        "userSymbol": "HtmlFormApp",
+        "version": "3",
+        "libraryId": "1uLJrVXGaI-ceHFl_VC1U5jcynKpR2qnNG2tNPd03QJZw1jCcKw2_Oiwh"
+      }
+    ]
+  },
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "DOMAIN"
+  }
 }
