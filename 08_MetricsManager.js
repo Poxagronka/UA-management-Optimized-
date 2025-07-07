@@ -185,11 +185,11 @@ function updateBundleGroupedCampaigns() {
   const hiddenHeaders = hiddenStatsData[0];
   const bundleHeaders = bundleGroupedData[0];
   
-  const hiddenIdIdx = UTILS.findColumnIndex(hiddenHeaders, 'Campaign ID');
-  const bundleIdIdx = UTILS.findColumnIndex(bundleHeaders, 'Campaign ID/Link');
-  const bundleLocalIdx = UTILS.findColumnIndex(bundleHeaders, 'Local');
-  const hiddenAutoIdx = UTILS.findColumnIndex(hiddenHeaders, 'is automated');
-  const bundleAutoIdx = UTILS.findColumnIndex(bundleHeaders, 'Is Automated');
+  const hiddenIdIdx = UTILS.findColumnIndex(hiddenHeaders, ['Campaign ID']);
+  const bundleIdIdx = UTILS.findColumnIndex(bundleHeaders, ['Campaign ID/Link']);
+  const bundleLocalIdx = UTILS.findColumnIndex(bundleHeaders, ['Local']);
+  const hiddenAutoIdx = UTILS.findColumnIndex(hiddenHeaders, ['is automated']);
+  const bundleAutoIdx = UTILS.findColumnIndex(bundleHeaders, ['Is Automated']);
   
   UTILS.log(`🔍 Metrics: Найдены колонки - Hidden ID: ${hiddenIdIdx}, Bundle ID: ${bundleIdIdx}, Local: ${bundleLocalIdx}, Auto: ${hiddenAutoIdx}/${bundleAutoIdx}`);
   
@@ -226,26 +226,27 @@ function updateBundleGroupedCampaigns() {
   
   UTILS.log(`🗂️ Metrics: Создана lookup таблица для ${Object.keys(lookup).length} кампаний`);
   
-  // Применение обновлений
+  // Применение обновлений только к валидным строкам
+  const validRows = UTILS.getValidRows(bundleGroupedSheet);
   const updates = [];
   let matchedCount = 0;
   
-  for (let r = 1; r < bundleGroupedData.length; r++) {
-    const id = bundleGroupedData[r][bundleIdIdx];
+  validRows.forEach(row => {
+    const id = row.data[bundleIdIdx];
     if (lookup[id]) {
       validColumns.forEach(col => {
         let val = lookup[id].row[col.hiddenIdx];
         if (col.divideBy) val = val / col.divideBy;
-        updates.push({ row: r + 1, col: col.bundleIdx + 1, value: val });
+        updates.push({ row: row.index + 1, col: col.bundleIdx + 1, value: val });
       });
       
       const loc = lookup[id].locale;
       if (loc) {
-        updates.push({ row: r + 1, col: bundleLocalIdx + 1, value: loc });
+        updates.push({ row: row.index + 1, col: bundleLocalIdx + 1, value: loc });
       }
       matchedCount++;
     }
-  }
+  });
   
   UTILS.log(`🎯 Metrics: Сопоставлено ${matchedCount} кампаний, подготовлено ${updates.length} обновлений`);
   
@@ -289,51 +290,59 @@ function updateBundleGroupTotals() {
   
   UTILS.log(`🔍 Metrics: Найдены колонки - Source: ${sourceIdx}, eProfit: ${eProfitIdx}`);
   
-  // Найти группы (строки с зеленым фоном #cbffdf)
-  const groups = [];
-  let currentStart = -1;
-  
-  for (let i = 1; i < backgrounds.length; i++) {
-    const bg = backgrounds[i][0].toLowerCase();
-    if (bg === '#cbffdf') {
-      if (currentStart !== -1) {
-        groups.push({ start: currentStart, end: i - 1 });
-      }
-      currentStart = i;
-    }
-  }
-  if (currentStart !== -1) {
-    groups.push({ start: currentStart, end: backgrounds.length - 1 });
-  }
-  
-  UTILS.log(`📊 Metrics: Найдено ${groups.length} групп для обработки`);
-  
-  // Вычисление сумм для каждой группы
+  // Найти группы (строки с зеленым фоном #cbffdf) и обработать их
+  const validRows = UTILS.getValidRows(sheet, { includeGroupHeaders: true });
   const updates = [];
   let processedGroups = 0;
   
-  for (const group of groups) {
-    let sum = 0;
-    let hasValidData = false;
-    let itemsInGroup = 0;
-    
-    for (let r = group.start + 1; r <= group.end; r++) {
-      if (UTILS.isStandardBackground(backgrounds[r][0])) {
-        const value = UTILS.parseNumber(data[r][eProfitIdx]);
-        if (value !== null) {
-          sum += value;
-          hasValidData = true;
+  // Группировка строк по заголовкам групп
+  let currentGroup = [];
+  let currentGroupHeader = null;
+  
+  validRows.forEach(row => {
+    if (row.isGroupHeader) {
+      // Обработать предыдущую группу если есть
+      if (currentGroupHeader && currentGroup.length > 0) {
+        let sum = 0, hasValidData = false;
+        
+        currentGroup.forEach(groupRow => {
+          const value = UTILS.parseNumber(groupRow.data[eProfitIdx]);
+          if (value !== null) {
+            sum += value;
+            hasValidData = true;
+          }
+        });
+        
+        if (hasValidData) {
+          updates.push({ row: currentGroupHeader.index + 1, col: eProfitIdx + 1, value: sum.toFixed(2) });
+          processedGroups++;
         }
-        itemsInGroup++;
       }
+      
+      // Начать новую группу
+      currentGroupHeader = row;
+      currentGroup = [];
+    } else if (currentGroupHeader) {
+      currentGroup.push(row);
     }
+  });
+  
+  // Обработать последнюю группу
+  if (currentGroupHeader && currentGroup.length > 0) {
+    let sum = 0, hasValidData = false;
+    
+    currentGroup.forEach(groupRow => {
+      const value = UTILS.parseNumber(groupRow.data[eProfitIdx]);
+      if (value !== null) {
+        sum += value;
+        hasValidData = true;
+      }
+    });
     
     if (hasValidData) {
-      updates.push({ row: group.start + 1, col: eProfitIdx + 1, value: sum.toFixed(2) });
+      updates.push({ row: currentGroupHeader.index + 1, col: eProfitIdx + 1, value: sum.toFixed(2) });
       processedGroups++;
     }
-    
-    UTILS.log(`📊 Metrics: Группа ${processedGroups} - элементов: ${itemsInGroup}, сумма: ${sum.toFixed(2)}`);
   }
   
   UTILS.log(`🧮 Metrics: Обработано групп: ${processedGroups}, подготовлено обновлений: ${updates.length}`);
@@ -355,7 +364,6 @@ function updateROASValuesOnly() {
   }
   
   const data = sheet.getDataRange().getValues();
-  const backgrounds = sheet.getRange(1, 1, sheet.getLastRow(), 1).getBackgrounds();
   const headers = data[0];
   
   const roasIdx = UTILS.findColumnIndex(headers, 'eROAS d365');
@@ -366,42 +374,64 @@ function updateROASValuesOnly() {
   
   UTILS.log(`🔍 Metrics: Найдена колонка eROAS d365: ${roasIdx}`);
   
-  // Найти заголовки групп
-  const groupHeaders = [];
-  for (let i = 1; i < backgrounds.length; i++) {
-    if (backgrounds[i][0].toLowerCase() === '#cbffdf') {
-      groupHeaders.push(i);
-    }
-  }
-  
-  UTILS.log(`📊 Metrics: Найдено ${groupHeaders.length} заголовков групп`);
-  
-  // Вычисление средних значений для групп
+  // Получить валидные строки включая заголовки групп
+  const validRows = UTILS.getValidRows(sheet, { includeGroupHeaders: true });
   const updates = [];
   
-  for (let x = 0; x < groupHeaders.length; x++) {
-    const start = groupHeaders[x];
-    const end = x < groupHeaders.length - 1 ? groupHeaders[x + 1] - 1 : backgrounds.length - 1;
-    
-    let sum = 0, count = 0;
-    for (let y = start + 1; y <= end; y++) {
-      if (UTILS.isStandardBackground(backgrounds[y][0])) {
-        const value = UTILS.parseNumber(data[y][roasIdx]);
-        if (value !== null) {
-          sum += value;
-          count++;
+  // Группировка строк по заголовкам групп
+  let currentGroup = [];
+  let currentGroupHeader = null;
+  let groupsProcessed = 0;
+  
+  validRows.forEach(row => {
+    if (row.isGroupHeader) {
+      // Обработать предыдущую группу если есть
+      if (currentGroupHeader && currentGroup.length > 0) {
+        let sum = 0, count = 0;
+        
+        currentGroup.forEach(groupRow => {
+          const value = UTILS.parseNumber(groupRow.data[roasIdx]);
+          if (value !== null) {
+            sum += value;
+            count++;
+          }
+        });
+        
+        if (count > 0) {
+          const avg = (sum / count).toFixed(2);
+          updates.push({ row: currentGroupHeader.index + 1, col: roasIdx + 1, value: avg });
+          groupsProcessed++;
         }
       }
+      
+      // Начать новую группу
+      currentGroupHeader = row;
+      currentGroup = [];
+    } else if (currentGroupHeader) {
+      currentGroup.push(row);
     }
+  });
+  
+  // Обработать последнюю группу
+  if (currentGroupHeader && currentGroup.length > 0) {
+    let sum = 0, count = 0;
+    
+    currentGroup.forEach(groupRow => {
+      const value = UTILS.parseNumber(groupRow.data[roasIdx]);
+      if (value !== null) {
+        sum += value;
+        count++;
+      }
+    });
     
     if (count > 0) {
       const avg = (sum / count).toFixed(2);
-      updates.push({ row: start + 1, col: roasIdx + 1, value: avg });
-      UTILS.log(`📊 Metrics: Группа ${x + 1} - элементов: ${count}, среднее ROAS: ${avg}`);
+      updates.push({ row: currentGroupHeader.index + 1, col: roasIdx + 1, value: avg });
+      groupsProcessed++;
     }
   }
   
-  UTILS.log(`📈 Metrics: Подготовлено ${updates.length} обновлений ROAS`);
+  UTILS.log(`📈 Metrics: Обработано групп: ${groupsProcessed}, подготовлено ${updates.length} обновлений ROAS`);
   
   if (updates.length > 0) {
     UTILS.batchUpdate(sheet, updates);

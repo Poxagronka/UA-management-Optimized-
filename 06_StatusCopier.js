@@ -25,7 +25,7 @@ function copyStatusToTarget() {
     UTILS.log(`📊 StatusCopier: Источник - ${sourceValues.length - 1} строк данных`);
     
     const sourceHeaders = sourceValues[0];
-    const sourceCampaignIdColIdx = UTILS.findColumnIndex(sourceHeaders, ['campaign id/link']);
+    const sourceCampaignIdColIdx = UTILS.findColumnIndex(sourceHeaders, ['campaign id/link', 'campaign id', 'id']);
     const sourceStatusColIdx = UTILS.findColumnIndex(sourceHeaders, ['test status', 'status']);
     
     if (sourceCampaignIdColIdx === -1 || sourceStatusColIdx === -1) {
@@ -58,25 +58,28 @@ function copyStatusToTarget() {
     
     UTILS.log(`🗂️ StatusCopier: Создана карта для ${targetCampaignCount} кампаний в целевой таблице`);
     
-    // Подготовка обновлений
+    // Подготовка обновлений только для валидных строк источника
     const updates = [];
     let updatedCount = 0;
     let matchedCampaigns = 0;
     let skippedByMissingId = 0;
     
-    for (let i = 1; i < sourceValues.length; i++) {
-      const campaignId = UTILS.extractCampaignId(sourceValues[i][sourceCampaignIdColIdx]);
+    const validSourceRows = UTILS.getValidRows(sourceSheet);
+    UTILS.log(`📊 StatusCopier: Найдено ${validSourceRows.length} валидных строк в источнике`);
+    
+    validSourceRows.forEach(row => {
+      const campaignId = UTILS.extractCampaignId(row.data[sourceCampaignIdColIdx]);
       if (!campaignId) {
         skippedByMissingId++;
-        continue;
+        return;
       }
       
       const targetRowIndex = campaignMap[String(campaignId)];
-      if (!targetRowIndex) continue;
+      if (!targetRowIndex) return;
       
       matchedCampaigns++;
-      const sourceStatus = sourceValues[i][sourceStatusColIdx];
-      const sourceBackground = sourceBackgrounds[i][sourceStatusColIdx];
+      const sourceStatus = row.data[sourceStatusColIdx];
+      const sourceBackground = sourceBackgrounds[row.index][sourceStatusColIdx];
       
       updates.push({
         row: targetRowIndex,
@@ -90,9 +93,9 @@ function copyStatusToTarget() {
       
       if (Date.now() - startTime.getTime() > MAX_EXECUTION_TIME) {
         UTILS.log(`⏰ StatusCopier: Превышено максимальное время выполнения при подготовке обновлений`);
-        break;
+        return; // Прерываем forEach
       }
-    }
+    });
     
     UTILS.log(`📊 StatusCopier: Статистика сопоставления - Сопоставлено: ${matchedCampaigns}, К обновлению: ${updatedCount}, Пропущено без ID: ${skippedByMissingId}`);
     

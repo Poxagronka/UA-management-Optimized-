@@ -64,7 +64,6 @@ function createPatchManager() {
     const sheetName = sheet.getName();
     
     const data = sheet.getDataRange().getValues();
-    const backgrounds = sheet.getDataRange().getBackgrounds();
     const headers = data[0];
     
     // Поиск необходимых колонок
@@ -85,23 +84,20 @@ function createPatchManager() {
     const requests = [];
     const cacheKeys = [];
     const rowDataMap = new Map();
-    let validCampaigns = 0;
-    let skippedByBackground = 0;
-    let skippedByInvalidId = 0;
+    
+    // Получение валидных строк
+    const validRows = UTILS.getValidRows(sheet);
+    UTILS.log(`📊 PatchOptimization: Лист "${sheetName}" - найдено ${validRows.length} валидных строк`);
+    
+    let validCampaigns = 0, skippedByInvalidId = 0;
     
     // Подготовка данных для кеширования и обработки
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const campaignId = UTILS.extractCampaignId(row[columnMap.campaignId]);
+    validRows.forEach(row => {
+      const campaignId = UTILS.extractCampaignId(row.data[columnMap.campaignId]);
       
       if (!UTILS.isValidId(campaignId)) {
         skippedByInvalidId++;
-        continue;
-      }
-      
-      if (!UTILS.isStandardBackground(backgrounds[i][columnMap.campaignId])) {
-        skippedByBackground++;
-        continue;
+        return;
       }
       
       validCampaigns++;
@@ -109,9 +105,9 @@ function createPatchManager() {
       cacheKeys.push(cacheKey);
       
       const payload = createPayload(
-        row[columnMap.status],
-        row[columnMap.optimization], 
-        row[columnMap.dailyBudget]
+        row.data[columnMap.status],
+        row.data[columnMap.optimization], 
+        row.data[columnMap.dailyBudget]
       );
       
       rowDataMap.set(cacheKey, {
@@ -120,7 +116,9 @@ function createPatchManager() {
         cacheKey,
         hash: getDataHash(payload)
       });
-    }
+    });
+    
+    UTILS.log(`📊 PatchOptimization: Лист "${sheetName}" - валидных кампаний: ${validCampaigns}, невалидных ID: ${skippedByInvalidId}`);
     
     if (validCampaigns === 0) {
       UTILS.log(`⚠️ PatchOptimization: Лист "${sheetName}" - нет валидных кампаний для обработки`);

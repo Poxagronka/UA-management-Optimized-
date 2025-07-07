@@ -22,35 +22,39 @@ function toggleCampaignAutoBids() {
   
   UTILS.log(`✅ AutoBid: Найдены колонки - Internal ID: ${internalIdColIndex}, Is Automated: ${isAutomatedColIndex}`);
   
+  // Получаем валидные строки
+  const validRows = UTILS.getValidRows(sheet);
+  UTILS.log(`📊 AutoBid: Найдено ${validRows.length} валидных строк для обработки`);
+  
   const rowsToProcess = [];
   let cachedCount = 0;
   let emptyIdCount = 0;
   
   // Сбор данных для обработки
-  for (let i = 1; i < data.length; i++) {
-    const internalId = data[i][internalIdColIndex]?.toString().trim();
+  validRows.forEach(row => {
+    const internalId = row.data[internalIdColIndex]?.toString().trim();
     if (!internalId) {
       emptyIdCount++;
-      continue;
+      return;
     }
     
-    const isAutomated = data[i][isAutomatedColIndex]?.toString().toUpperCase() === "TRUE";
+    const isAutomated = row.data[isAutomatedColIndex]?.toString().toUpperCase() === "TRUE";
     const cacheKey = `appodeal_campaign_${internalId}`;
     const cachedValue = UTILS.cache.get(cacheKey);
     
     // Проверка кеша
     if (cachedValue !== null && cachedValue === isAutomated.toString()) {
       cachedCount++;
-      continue;
+      return;
     }
     
     rowsToProcess.push({
-      rowIndex: i + 1,
+      rowIndex: row.index + 1,
       internalId,
       isAutomated,
       cacheKey
     });
-  }
+  });
   
   UTILS.log(`📈 AutoBid: Пустых ID: ${emptyIdCount}, В кеше: ${cachedCount}, К обработке: ${rowsToProcess.length}`);
   

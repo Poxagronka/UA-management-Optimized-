@@ -11,8 +11,14 @@ const UTILS = {
     CACHE_EXPIRATION: 24 * 60 * 60,
     BATCH_SIZE: 50,
     MAX_RETRIES: 3,
-    // Целевые листы для обработки
-    TARGET_SHEETS: ["Planning", "Bundle Grouped Campaigns"]
+    TARGET_SHEETS: ["Planning", "Bundle Grouped Campaigns"],
+    
+    // Структура заголовков для Bundle Grouped Campaigns:
+    // Campaign ID/Link, internal id, Edit, Local, Source, Campaign Status, Install limit, 
+    // Stopped by install limit, Today Installs, Is Automated, Optimization, Overall Budget,
+    // Latest optimization value, Today CPI, Limit СPI, Average CPI in the last 14 days,
+    // eARPU 365, Impressions, IPM, eROAS d365, eProfit d730, Daily Budget, Today Spend,
+    // Spend in the last 14 days, Paused by, Out of Budget, Comments
   },
 
   // Логирование
@@ -21,6 +27,47 @@ const UTILS = {
       if (typeof message === 'object') message = JSON.stringify(message);
       console.log(message.length > 1000 ? message.substring(0, 1000) + '...' : message);
     } catch (e) {}
+  },
+
+  // Централизованная проверка валидности строк
+  getValidRows: (sheet, options = {}) => {
+    const { 
+      includeGroupHeaders = false, 
+      statusFilter = null, 
+      statusColumn = null,
+      startRow = 1 
+    } = options;
+    
+    const data = sheet.getDataRange().getValues();
+    const backgrounds = sheet.getDataRange().getBackgrounds();
+    const validRows = [];
+    
+    for (let i = startRow; i < data.length; i++) {
+      const bgColor = backgrounds[i][0];
+      
+      // Пропускаем строки с цветным фоном, кроме заголовков групп если нужно
+      if (!UTILS.isStandardBackground(bgColor)) {
+        if (includeGroupHeaders && bgColor?.toLowerCase() === '#cbffdf') {
+          validRows.push({ index: i, isGroupHeader: true, data: data[i] });
+        }
+        continue;
+      }
+      
+      // Проверка статуса если указано
+      if (statusFilter && statusColumn !== null) {
+        const status = String(data[i][statusColumn] || '').toLowerCase();
+        if (status && status !== statusFilter) continue;
+      }
+      
+      validRows.push({ index: i, isGroupHeader: false, data: data[i] });
+    }
+    
+    return validRows;
+  },
+
+  // Упрощенная функция для получения только индексов
+  getValidRowIndices: (sheet, options = {}) => {
+    return UTILS.getValidRows(sheet, options).map(row => row.index);
   },
 
   // Извлечение Campaign ID
@@ -115,7 +162,6 @@ const UTILS = {
     
     const stopWords = ["ambo", "cpi", "cpa", "cpa2", "bidmachine", "pubnative", "fyber", "smaato", "autobudget", "skipctr", "106", "80", "2"];
     
-    // Поиск subject= или subj=
     const match = title.match(/(?:subject|subj)\s*=\s*([^\s]+(?:\.[^\s]+)*)/i);
     if (match?.[1]) {
       let source = match[1].trim();
@@ -130,11 +176,9 @@ const UTILS = {
       if (source && !stopWords.includes(source.toLowerCase())) return source;
     }
     
-    // Поиск числового ID
     const numMatch = title.match(/\b\d{6,}\b/);
     if (numMatch) return numMatch[0];
     
-    // Поиск package name
     const pkgMatch = title.match(/\b(com\.|and\.|ru\.)[a-zA-Z0-9._]+/i);
     if (pkgMatch?.[0]?.includes('.')) return pkgMatch[0];
     
@@ -178,29 +222,26 @@ const UTILS = {
   // Сбор Campaign ID из листа
   collectCampaignIds: (sheet, statusFilter = 'running') => {
     const data = sheet.getDataRange().getValues();
-    const backgrounds = sheet.getDataRange().getBackgrounds();
     const headers = data[0];
     
     const idCol = UTILS.findColumnIndex(headers, ['campaign id/link', 'campaign id', 'id']);
     const statusCol = UTILS.findColumnIndex(headers, ['campaign status', 'status']);
     
-    if (idCol === -1) return [];
-    
-    const results = [];
-    for (let i = 1; i < data.length; i++) {
-      if (!UTILS.isStandardBackground(backgrounds[i][0])) continue;
-      
-      if (statusCol !== -1) {
-        const status = String(data[i][statusCol] || '').toLowerCase();
-        if (status && status !== statusFilter) continue;
-      }
-      
-      const campaignId = UTILS.extractCampaignId(data[i][idCol]);
-      if (campaignId) {
-        results.push({ id: campaignId, rowIndex: i + 1, sheetName: sheet.getName() });
-      }
+    if (idCol === -1) {
+      UTILS.log(`❌ CollectIds: Не найдена колонка Campaign ID в листе "${sheet.getName()}"`);
+      return [];
     }
-    return results;
+    
+    const validRows = UTILS.getValidRows(sheet, { 
+      statusFilter, 
+      statusColumn: statusCol 
+    });
+    
+    return validRows.map(row => ({
+      id: UTILS.extractCampaignId(row.data[idCol]),
+      rowIndex: row.index + 1,
+      sheetName: sheet.getName()
+    })).filter(item => item.id);
   },
 
   // Пакетное обновление
@@ -240,22 +281,70 @@ const UTILS = {
 
   // Статус скрипта
   status: {
+    commentsCell: null, // Координаты ячейки Comments
+    
+    findCommentsCell: () => {
+      try {
+        const sheet = UTILS.getSheet('Bundle Grouped Campaigns');
+        if (!sheet) return null;
+        
+        // Ищем ячейку с текстом "Comments" во всем листе
+        const dataRange = sheet.getDataRange();
+        const values = dataRange.getValues();
+        
+        for (let row = 0; row < values.length; row++) {
+          for (let col = 0; col < values[row].length; col++) {
+            if (String(values[row][col]).toLowerCase().trim() === 'comments') {
+              const cellLocation = { row: row + 1, col: col + 1 };
+              UTILS.status.commentsCell = cellLocation;
+              UTILS.log(`✅ Status: Найдена ячейка Comments в позиции [${cellLocation.row}, ${cellLocation.col}]`);
+              return cellLocation;
+            }
+          }
+        }
+        
+        UTILS.log('⚠️ Status: Ячейка Comments не найдена');
+        return null;
+      } catch (e) {
+        UTILS.log(`❌ Status: Ошибка поиска ячейки Comments: ${e.message}`);
+        return null;
+      }
+    },
+    
     update: (status, message, color = '#ffffff') => {
       try {
+        if (!UTILS.status.commentsCell) return;
+        
         const sheet = UTILS.getSheet('Bundle Grouped Campaigns');
         if (!sheet) return;
         
-        const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-        const commentsCol = UTILS.findColumnIndex(headers, 'comments');
-        
-        if (commentsCol !== -1) {
-          const cell = sheet.getRange(1, commentsCol + 1);
-          cell.setValue(`[${status}] ${message}`);
-          cell.setBackground(color);
-          cell.setFontWeight('bold');
-        }
+        const cell = sheet.getRange(UTILS.status.commentsCell.row, UTILS.status.commentsCell.col);
+        cell.setValue(`[${status}] ${message}`);
+        cell.setBackground(color);
+        cell.setFontWeight('bold');
         SpreadsheetApp.flush();
-      } catch (e) {}
+      } catch (e) {
+        UTILS.log(`❌ Status: Ошибка обновления статуса: ${e.message}`);
+      }
+    },
+    
+    restore: () => {
+      try {
+        if (!UTILS.status.commentsCell) return;
+        
+        const sheet = UTILS.getSheet('Bundle Grouped Campaigns');
+        if (!sheet) return;
+        
+        const cell = sheet.getRange(UTILS.status.commentsCell.row, UTILS.status.commentsCell.col);
+        cell.setValue('Comments');
+        cell.setBackground('#ffffff');
+        cell.setFontWeight('bold'); // Жирный текст как у других заголовков
+        cell.setFontColor('#000000');
+        SpreadsheetApp.flush();
+        UTILS.log('✅ Status: Восстановлена ячейка Comments');
+      } catch (e) {
+        UTILS.log(`❌ Status: Ошибка восстановления: ${e.message}`);
+      }
     }
   },
 

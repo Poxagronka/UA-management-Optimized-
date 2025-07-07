@@ -63,24 +63,12 @@ function loginAndSaveCampaigns() {
 function collectCampaignIdsSafe(sheet, sheetName) {
   UTILS.log(`🔍 Auth: Собираем Campaign ID из листа "${sheetName}"`);
   
-  const campaignIds = [];
   const data = sheet.getDataRange().getValues();
-  const colors = sheet.getDataRange().getBackgrounds();
   const headers = data[0];
   
   // Поиск колонок
-  let idColumnIndex = -1;
-  let statusColumnIndex = -1;
-  
-  for (let i = 0; i < headers.length; i++) {
-    const headerText = String(headers[i] || "").toLowerCase();
-    if (headerText.includes("campaign id") || headerText === "id") {
-      idColumnIndex = i;
-    }
-    if (headerText.includes("campaign status") || headerText === "status") {
-      statusColumnIndex = i;
-    }
-  }
+  const idColumnIndex = UTILS.findColumnIndex(headers, ['campaign id/link', 'campaign id', 'id']);
+  const statusColumnIndex = UTILS.findColumnIndex(headers, ['campaign status', 'status']);
   
   if (idColumnIndex === -1) {
     UTILS.log(`❌ Auth: Не найдена колонка с Campaign ID в листе "${sheetName}"`);
@@ -89,44 +77,32 @@ function collectCampaignIdsSafe(sheet, sheetName) {
   
   UTILS.log(`📋 Auth: Лист "${sheetName}" - найдены колонки ID: ${idColumnIndex}, Status: ${statusColumnIndex}`);
   
-  // Определяем стандартный цвет фона
-  const standardColor = colors[0][0];
-  let validRows = 0, skippedByColor = 0, skippedByStatus = 0, skippedByInvalidId = 0;
+  // Получаем валидные строки с фильтром по статусу
+  const validRowsData = UTILS.getValidRows(sheet, {
+    statusFilter: 'running',
+    statusColumn: statusColumnIndex
+  });
   
-  // Проходим по строкам
-  for (let row = 1; row < data.length; row++) {
-    // Проверяем цвет фона
-    const currentBackgroundColor = colors[row][0];
-    if (currentBackgroundColor !== standardColor) {
-      skippedByColor++;
-      continue;
-    }
-    
-    // Проверяем статус кампании
-    if (statusColumnIndex !== -1) {
-      const status = String(data[row][statusColumnIndex] || "").toLowerCase();
-      if (status && status !== "running") {
-        skippedByStatus++;
-        continue;
-      }
-    }
-    
-    // Получаем ID кампании
-    const campaignIdCell = String(data[row][idColumnIndex] || "");
+  const campaignIds = [];
+  let validCount = 0, skippedByInvalidId = 0;
+  
+  // Проходим по валидным строкам
+  validRowsData.forEach(row => {
+    const campaignIdCell = String(row.data[idColumnIndex] || "");
     const campaignId = UTILS.extractCampaignId(campaignIdCell);
     
     if (campaignId) {
       campaignIds.push({ 
         id: campaignId, 
-        rowIndex: row + 1
+        rowIndex: row.index + 1
       });
-      validRows++;
+      validCount++;
     } else {
       skippedByInvalidId++;
     }
-  }
+  });
   
-  UTILS.log(`📊 Auth: Лист "${sheetName}" - валидных: ${validRows}, пропущено: цвет ${skippedByColor}, статус ${skippedByStatus}, невалидный ID ${skippedByInvalidId}`);
+  UTILS.log(`📊 Auth: Лист "${sheetName}" - валидных: ${validCount}, невалидный ID: ${skippedByInvalidId}`);
   return campaignIds;
 }
 

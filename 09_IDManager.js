@@ -16,23 +16,27 @@ function updateCampaignIdMappings() {
   
   UTILS.log(`📊 IDManager: Найдено ${data.length - 1} строк данных, колонка Internal ID: ${internalIdColIndex}`);
   
+  // Получение валидных строк
+  const validRows = UTILS.getValidRows(sheet);
+  UTILS.log(`📊 IDManager: Найдено ${validRows.length} валидных строк для обработки`);
+  
   const campaignIds = {};
   const cacheKeys = [];
   const currentInternalIds = {};
   let validCampaignCount = 0;
   
-  // Сбор данных из таблицы
-  for (let i = 1; i < data.length; i++) {
-    const campaignId = UTILS.extractCampaignId(data[i][campaignIdColIndex]);
-    if (!campaignId) continue;
+  // Сбор данных из валидных строк
+  validRows.forEach(row => {
+    const campaignId = UTILS.extractCampaignId(row.data[campaignIdColIndex]);
+    if (!campaignId) return;
     
-    campaignIds[campaignId] = i;
-    const internalId = data[i][internalIdColIndex];
+    campaignIds[campaignId] = row.index;
+    const internalId = row.data[internalIdColIndex];
     if (internalId) currentInternalIds[campaignId] = internalId;
     
     cacheKeys.push(getCampaignCacheKey(campaignId));
     validCampaignCount++;
-  }
+  });
   
   UTILS.log(`🔍 IDManager: Найдено ${validCampaignCount} валидных Campaign ID`);
   
