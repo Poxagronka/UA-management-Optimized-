@@ -26,8 +26,15 @@ function main() {
     
     UTILS.log(`[${executionId}] ЗАПУСК СКРИПТА`);
     
-    // В самом начале находим и запоминаем ячейку Comments
-    UTILS.status.findCommentsCell();
+    // Сначала очищаем любые оставшиеся статусы от предыдущих запусков
+    UTILS.status.cleanupStatusCells();
+    
+    // Находим и сохраняем координаты ячейки Comments
+    const commentsCell = UTILS.status.findAndSaveCommentsCell();
+    if (!commentsCell) {
+      UTILS.log(`[${executionId}] ⚠️ Не найдена ячейка Comments - статус не будет отображаться`);
+    }
+    
     UTILS.status.update("RUNNING", "Initializing script", "#e6f7ff");
     
     const functions = [
@@ -105,32 +112,12 @@ function main() {
   } finally {
     UTILS.cleanup();
     
-    // Правильное восстановление ячейки Comments
+    // Восстанавливаем ячейку Comments
     try {
       UTILS.status.restore();
     } catch (e) {
       UTILS.log(`⚠️ Main: Ошибка восстановления статуса: ${e.message}`);
-      // Fallback - попытаться восстановить напрямую используя запомненные координаты
-      try {
-        if (UTILS.status.commentsCell) {
-          const sheet = UTILS.getSheet('Bundle Grouped Campaigns');
-          if (sheet) {
-            const cell = sheet.getRange(UTILS.status.commentsCell.row, UTILS.status.commentsCell.col);
-            cell.setValue('Comments');
-            cell.setBackground('#ffffff');
-            cell.setFontWeight('normal');
-            cell.setFontColor('#000000');
-            SpreadsheetApp.flush();
-            UTILS.log('✅ Main: Fallback восстановление выполнено');
-          }
-        }
-      } catch (fallbackError) {
-        UTILS.log(`❌ Main: Fallback восстановление не удалось: ${fallbackError.message}`);
-      }
     }
-    
-    // Сбрасываем запомненные координаты
-    UTILS.status.commentsCell = null;
     
     lock.releaseLock();
   }

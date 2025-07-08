@@ -279,26 +279,67 @@ const UTILS = {
     to: UTILS.formatDate(new Date())
   }),
 
-  // Статус скрипта
+  // Статус скрипта - улучшенная версия с надежным восстановлением
   status: {
-    commentsCell: null, // Координаты ячейки Comments
+    // Поиск и очистка любых статусных ячеек при старте
+    cleanupStatusCells: () => {
+      try {
+        const sheet = UTILS.getSheet('Bundle Grouped Campaigns');
+        if (!sheet) return;
+        
+        const dataRange = sheet.getDataRange();
+        const values = dataRange.getValues();
+        let cleanedCount = 0;
+        
+        // Ищем любые ячейки со статусами и сбрасываем их
+        for (let row = 0; row < values.length; row++) {
+          for (let col = 0; col < values[row].length; col++) {
+            const cellValue = String(values[row][col]);
+            // Проверяем является ли ячейка статусной
+            if (cellValue.match(/^\[(RUNNING|ERROR|COMPLETED|INITIALIZING)\]/)) {
+              const cell = sheet.getRange(row + 1, col + 1);
+              cell.setValue('Comments');
+              cell.setBackground('#ffffff');
+              cell.setFontWeight('bold');
+              cell.setFontColor('#000000');
+              cleanedCount++;
+              UTILS.log(`🧹 Status: Очищена статусная ячейка [${row + 1}, ${col + 1}]: "${cellValue}"`);
+            }
+          }
+        }
+        
+        if (cleanedCount > 0) {
+          SpreadsheetApp.flush();
+          UTILS.log(`🧹 Status: Очищено ${cleanedCount} статусных ячеек`);
+        }
+        
+        // Очищаем кеш координат от предыдущего запуска
+        UTILS.cache.remove('status_cell_coords');
+        
+      } catch (e) {
+        UTILS.log(`❌ Status: Ошибка очистки статусных ячеек: ${e.message}`);
+      }
+    },
     
-    findCommentsCell: () => {
+    // Поиск ячейки Comments и сохранение координат
+    findAndSaveCommentsCell: () => {
       try {
         const sheet = UTILS.getSheet('Bundle Grouped Campaigns');
         if (!sheet) return null;
         
-        // Ищем ячейку с текстом "Comments" во всем листе
         const dataRange = sheet.getDataRange();
         const values = dataRange.getValues();
         
         for (let row = 0; row < values.length; row++) {
           for (let col = 0; col < values[row].length; col++) {
             if (String(values[row][col]).toLowerCase().trim() === 'comments') {
-              const cellLocation = { row: row + 1, col: col + 1 };
-              UTILS.status.commentsCell = cellLocation;
-              UTILS.log(`✅ Status: Найдена ячейка Comments в позиции [${cellLocation.row}, ${cellLocation.col}]`);
-              return cellLocation;
+              const coords = { row: row + 1, col: col + 1 };
+              
+              // Сохраняем координаты в кеш для восстановления
+              UTILS.cache.put('status_cell_coords', JSON.stringify(coords), 3600);
+              
+              UTILS.log(`✅ Status: Найдена и сохранена ячейка Comments [${coords.row}, ${coords.col}]`);
+              return coords;
             }
           }
         }
@@ -311,14 +352,17 @@ const UTILS = {
       }
     },
     
+    // Обновление статуса
     update: (status, message, color = '#ffffff') => {
       try {
-        if (!UTILS.status.commentsCell) return;
+        const cachedCoords = UTILS.cache.get('status_cell_coords');
+        if (!cachedCoords) return;
         
+        const coords = JSON.parse(cachedCoords);
         const sheet = UTILS.getSheet('Bundle Grouped Campaigns');
         if (!sheet) return;
         
-        const cell = sheet.getRange(UTILS.status.commentsCell.row, UTILS.status.commentsCell.col);
+        const cell = sheet.getRange(coords.row, coords.col);
         cell.setValue(`[${status}] ${message}`);
         cell.setBackground(color);
         cell.setFontWeight('bold');
@@ -328,20 +372,30 @@ const UTILS = {
       }
     },
     
+    // Восстановление ячейки Comments
     restore: () => {
       try {
-        if (!UTILS.status.commentsCell) return;
+        const cachedCoords = UTILS.cache.get('status_cell_coords');
+        if (!cachedCoords) {
+          UTILS.log('⚠️ Status: Нет сохраненных координат для восстановления');
+          return;
+        }
         
+        const coords = JSON.parse(cachedCoords);
         const sheet = UTILS.getSheet('Bundle Grouped Campaigns');
         if (!sheet) return;
         
-        const cell = sheet.getRange(UTILS.status.commentsCell.row, UTILS.status.commentsCell.col);
+        const cell = sheet.getRange(coords.row, coords.col);
         cell.setValue('Comments');
         cell.setBackground('#ffffff');
-        cell.setFontWeight('bold'); // Жирный текст как у других заголовков
+        cell.setFontWeight('bold');
         cell.setFontColor('#000000');
         SpreadsheetApp.flush();
-        UTILS.log('✅ Status: Восстановлена ячейка Comments');
+        
+        // Очищаем кеш после успешного восстановления
+        UTILS.cache.remove('status_cell_coords');
+        
+        UTILS.log('✅ Status: Ячейка Comments восстановлена');
       } catch (e) {
         UTILS.log(`❌ Status: Ошибка восстановления: ${e.message}`);
       }
