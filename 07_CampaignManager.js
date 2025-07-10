@@ -49,18 +49,11 @@ function stopCampaignIfHighImpressionsOrSpend() {
   }
   
   const validRows = UTILS.getValidRows(sheet);
-  UTILS.log(`📊 CampManager: Найдено ${validRows.length} валидных строк для анализа`);
-  
   const campaignsToStop = [];
-  let invalidIdCount = 0;
   
   validRows.forEach(row => {
     const campaignId = UTILS.extractCampaignId(row.data[columnMap.campaignId]);
-    
-    if (!UTILS.isValidId(campaignId)) {
-      invalidIdCount++;
-      return;
-    }
+    if (!UTILS.isValidId(campaignId)) return;
     
     const impressions = UTILS.parseNumber(row.data[columnMap.impressions]) || 0;
     const spend = UTILS.parseNumber(row.data[columnMap.spend14d]) || 0;
@@ -71,20 +64,13 @@ function stopCampaignIfHighImpressionsOrSpend() {
     const highSpendAndCPI = spend > 100 && cpi > 5;
     
     if (highImpressions || highSpendAndCPI) {
-      campaignsToStop.push({
-        id: campaignId,
-        reason: highImpressions ? `impressions (${impressions} > ${impressionsLimit})` : `spend/CPI (${spend}/${cpi})`,
-        impressions, spend, cpi
-      });
+      campaignsToStop.push(campaignId);
     }
   });
   
-  UTILS.log(`📊 CampManager: Невалидные ID: ${invalidIdCount}, К остановке: ${campaignsToStop.length}`);
-  
   if (campaignsToStop.length > 0) {
-    const campaignIds = campaignsToStop.map(c => c.id);
-    stopCampaigns(campaignIds);
-    UTILS.log(`✅ CampManager: Отправлены запросы на остановку ${campaignIds.length} кампаний`);
+    stopCampaigns(campaignsToStop);
+    UTILS.log(`✅ CampManager: Отправлены запросы на остановку ${campaignsToStop.length} кампаний`);
   }
   
   UTILS.log('✅ CampManager: stopCampaignIfHighImpressionsOrSpend завершен');
@@ -93,13 +79,8 @@ function stopCampaignIfHighImpressionsOrSpend() {
 function increaseOptimizationUntilActive() {
   UTILS.log('📈 CampManager: Начинаем increaseOptimizationUntilActive');
   
-  main();
-  
   const sheet = UTILS.getSheet("Planning", UTILS.CONFIG.SPREADSHEET_ID);
-  if (!sheet) {
-    UTILS.log('❌ CampManager: Лист Planning не найден');
-    return;
-  }
+  if (!sheet) return;
   
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
@@ -118,20 +99,15 @@ function increaseOptimizationUntilActive() {
     const newCol = sheet.getLastColumn() + 1;
     sheet.getRange(1, newCol).setValue("Optimization Freeze Timestamp");
     columnMap.freeze = newCol - 1;
-    UTILS.log(`📝 CampManager: Создана новая колонка Freeze Timestamp в позиции ${newCol}`);
   }
   
-  if (Object.values(columnMap).some(idx => idx === -1)) {
-    UTILS.log('❌ CampManager: Не все необходимые колонки найдены');
-    return;
-  }
+  if (Object.values(columnMap).some(idx => idx === -1)) return;
   
   const now = new Date();
   const formattedNow = UTILS.formatDate(now, "yyyy-MM-dd HH:mm");
   const updates = [];
   
   const validRows = UTILS.getValidRows(sheet);
-  let processedCampaigns = 0, increasedOptimization = 0;
   
   validRows.forEach(row => {
     const campaignId = UTILS.extractCampaignId(row.data[columnMap.campaignId]);
@@ -143,9 +119,7 @@ function increaseOptimizationUntilActive() {
     const freezeRaw = row.data[columnMap.freeze];
     
     if (status === "running") {
-      processedCampaigns++;
-      
-      // Логика управления freeze timestamp
+      // Управление freeze timestamp
       if (pace === 0 && spend === 0 && freezeRaw) {
         updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: "" });
       }
@@ -188,7 +162,7 @@ function increaseOptimizationUntilActive() {
         }
       }
       
-      // Логика увеличения оптимизации
+      // Увеличение оптимизации
       let delta = 0;
       const lowerPricing = pricing.toLowerCase();
       if (lowerPricing.includes("cpm")) delta = 5;
@@ -197,24 +171,17 @@ function increaseOptimizationUntilActive() {
       
       if (delta > 0) {
         const newOptValue = optValue + delta;
-        const patchSuccess = patchCampaign(campaignId, { optimization_value: newOptValue });
-        if (patchSuccess) {
+        if (patchCampaign(campaignId, { optimization_value: newOptValue })) {
           updates.push({ row: row.index + 1, col: columnMap.optValue + 1, value: newOptValue });
-          increasedOptimization++;
         }
       }
-    } else {
-      if (freezeRaw) {
-        updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: "" });
-      }
+    } else if (freezeRaw) {
+      updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: "" });
     }
   });
   
-  UTILS.log(`📊 CampManager: Обработано кампаний: ${processedCampaigns}, Увеличена оптимизация: ${increasedOptimization}`);
-  
   if (updates.length > 0) {
     UTILS.batchUpdate(sheet, updates);
-    UTILS.log(`✅ CampManager: Применено ${updates.length} обновлений`);
   }
   
   UTILS.log('✅ CampManager: increaseOptimizationUntilActive завершен');
@@ -224,10 +191,7 @@ function restartStoppedCampaigns() {
   UTILS.log('🔄 CampManager: Начинаем restartStoppedCampaigns');
   
   const sheet = UTILS.getSheet("Bundle Grouped Campaigns", UTILS.CONFIG.SPREADSHEET_ID);
-  if (!sheet) {
-    UTILS.log('❌ CampManager: Лист Bundle Grouped Campaigns не найден');
-    return;
-  }
+  if (!sheet) return;
   
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
@@ -237,14 +201,9 @@ function restartStoppedCampaigns() {
     stoppedByLimit: UTILS.findColumnIndex(headers, ['stopped by install limit'])
   };
   
-  if (Object.values(columnMap).some(idx => idx === -1)) {
-    UTILS.log(`❌ CampManager: Не найдены необходимые колонки`);
-    return;
-  }
+  if (Object.values(columnMap).some(idx => idx === -1)) return;
   
   const validRows = UTILS.getValidRows(sheet);
-  UTILS.log(`📊 CampManager: Найдено ${validRows.length} валидных строк`);
-  
   const today = UTILS.formatDate(new Date(), "yyyy-MM-dd");
   const campaignsToRestart = [];
   
@@ -255,37 +214,31 @@ function restartStoppedCampaigns() {
     if (campaignId && stoppedInfo && String(stoppedInfo).includes("Yes")) {
       const dateMatch = String(stoppedInfo).match(/Yes\s*\((\d{4}-\d{2}-\d{2})/);
       if (dateMatch && dateMatch[1] && dateMatch[1] !== today) {
-        campaignsToRestart.push({
-          id: campaignId,
-          stopDate: dateMatch[1],
-          reason: 'stopped_yesterday'
-        });
+        campaignsToRestart.push(campaignId);
       } else if (!dateMatch) {
-        campaignsToRestart.push({
-          id: campaignId,
-          reason: 'no_date_info'
-        });
+        campaignsToRestart.push(campaignId);
       }
     }
   });
   
-  UTILS.log(`🔄 CampManager: Найдено кампаний для перезапуска: ${campaignsToRestart.length}`);
-  
   if (campaignsToRestart.length > 0) {
-    const campaignIds = campaignsToRestart.map(c => c.id);
-    startCampaigns(campaignIds);
-    UTILS.log(`✅ CampManager: Отправлены запросы на перезапуск ${campaignIds.length} кампаний`);
+    startCampaigns(campaignsToRestart);
+    UTILS.log(`✅ CampManager: Отправлены запросы на перезапуск ${campaignsToRestart.length} кампаний`);
   }
 }
 
 function manageCampaignsBasedOnInstalls() {
   UTILS.log('📊 CampManager: Начинаем manageCampaignsBasedOnInstalls');
   
-  const sheet = UTILS.getSheet("Bundle Grouped Campaigns", UTILS.CONFIG.SPREADSHEET_ID);
-  if (!sheet) {
-    UTILS.log('❌ CampManager: Лист Bundle Grouped Campaigns не найден');
+  // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА ВРЕМЕНИ для безопасности
+  const currentHour = new Date().getHours();
+  if (currentHour < 3) {
+    UTILS.log(`⏰ CampManager: Слишком рано для остановки по лимиту инсталов (${currentHour}:xx < 3:00)`);
     return;
   }
+  
+  const sheet = UTILS.getSheet("Bundle Grouped Campaigns", UTILS.CONFIG.SPREADSHEET_ID);
+  if (!sheet) return;
   
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
@@ -302,13 +255,9 @@ function manageCampaignsBasedOnInstalls() {
     const lastColumn = sheet.getLastColumn();
     sheet.getRange(1, lastColumn + 1).setValue("Stopped by install limit");
     columnMap.stoppedByLimit = lastColumn;
-    UTILS.log(`📝 CampManager: Создана новая колонка Stopped by install limit`);
   }
   
-  if (columnMap.campaignId === -1 || columnMap.todayInstalls === -1) {
-    UTILS.log(`❌ CampManager: Не найдены обязательные колонки`);
-    return;
-  }
+  if (columnMap.campaignId === -1 || columnMap.todayInstalls === -1) return;
   
   const validRows = UTILS.getValidRows(sheet);
   const campaignsToStop = [];
@@ -316,8 +265,6 @@ function manageCampaignsBasedOnInstalls() {
   const dateTimeFormat = UTILS.formatDate(now, "yyyy-MM-dd HH:mm");
   const today = UTILS.formatDate(now, "yyyy-MM-dd");
   const updates = [];
-  
-  let alreadyStopped = 0;
   
   validRows.forEach(row => {
     const campaignId = UTILS.extractCampaignId(row.data[columnMap.campaignId]);
@@ -332,19 +279,11 @@ function manageCampaignsBasedOnInstalls() {
     // Проверка на уже остановленные сегодня
     if (stoppedByLimit && String(stoppedByLimit).includes("Yes")) {
       const dateMatch = String(stoppedByLimit).match(/Yes\s*\((\d{4}-\d{2}-\d{2})/);
-      if (dateMatch && dateMatch[1] === today) {
-        alreadyStopped++;
-        return;
-      }
+      if (dateMatch && dateMatch[1] === today) return;
     }
     
     if (todayInstalls > installLimit && (!status || status.toLowerCase() === "running")) {
-      campaignsToStop.push({
-        id: campaignId,
-        installs: todayInstalls,
-        limit: installLimit,
-        rowIndex: row.index + 1
-      });
+      campaignsToStop.push(campaignId);
       
       if (columnMap.stoppedByLimit !== -1) {
         updates.push({ row: row.index + 1, col: columnMap.stoppedByLimit + 1, value: `Yes (${dateTimeFormat})` });
@@ -355,17 +294,14 @@ function manageCampaignsBasedOnInstalls() {
     }
   });
   
-  UTILS.log(`📊 CampManager: Уже остановлено: ${alreadyStopped}, К остановке: ${campaignsToStop.length}`);
+  UTILS.log(`📊 CampManager: К остановке по лимиту инсталов: ${campaignsToStop.length}`);
   
   if (campaignsToStop.length > 0) {
-    const campaignIds = campaignsToStop.map(c => c.id);
-    stopCampaigns(campaignIds);
-    
+    stopCampaigns(campaignsToStop);
     if (updates.length > 0) {
       UTILS.batchUpdate(sheet, updates);
     }
-    
-    UTILS.log(`✅ CampManager: Отправлены запросы на остановку ${campaignIds.length} кампаний`);
+    UTILS.log(`✅ CampManager: Остановлено ${campaignsToStop.length} кампаний по лимиту инсталов`);
   }
 }
 
@@ -381,37 +317,20 @@ function isAfter3AM() {
 function stopCampaigns(campaignIds) {
   UTILS.log(`🛑 CampManager: Останавливаем ${campaignIds.length} кампаний`);
   
-  let successCount = 0, errorCount = 0;
-  
   campaignIds.forEach(campaignId => {
-    const success = patchCampaign(campaignId, { active: false });
-    if (success) {
-      successCount++;
-    } else {
-      errorCount++;
-    }
+    patchCampaign(campaignId, { active: false });
   });
-  
-  UTILS.log(`📊 CampManager: Остановка завершена - Успешно: ${successCount}, Ошибок: ${errorCount}`);
 }
 
 function startCampaigns(campaignIds) {
   UTILS.log(`🔄 CampManager: Запускаем ${campaignIds.length} кампаний`);
   
-  let successCount = 0, errorCount = 0;
-  
   campaignIds.forEach(campaignId => {
-    const result = patchCampaign(campaignId, { active: true });
-    if (result) {
+    if (patchCampaign(campaignId, { active: true })) {
       updateCampaignStatus(campaignId, "running");
       updateStoppedByLimitStatus(campaignId, "No");
-      successCount++;
-    } else {
-      errorCount++;
     }
   });
-  
-  UTILS.log(`📊 CampManager: Запуск завершен - Успешно: ${successCount}, Ошибок: ${errorCount}`);
 }
 
 function patchCampaign(campaignId, payload) {
