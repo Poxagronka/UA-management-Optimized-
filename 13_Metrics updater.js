@@ -49,6 +49,10 @@ function updateBundleGroupedCampaigns() {
       hiddenIdx: findColumnIndexExact(hiddenHeaders, 'ROAS')
     },
     {
+      bundleIdx: findColumnIndexExact(bundleHeaders, 'eROAS d730'),
+      hiddenIdx: findColumnIndexExact(hiddenHeaders, 'ROAS 730')
+    },
+    {
       bundleIdx: findColumnIndexExact(bundleHeaders, 'eProfit d730'),
       hiddenIdx: findColumnIndexExact(hiddenHeaders, 'Forecasted Profit'),
       divideBy: 10

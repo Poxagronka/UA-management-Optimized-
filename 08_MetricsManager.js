@@ -39,6 +39,7 @@ function updateEROASData() {
         { id: "spend", day: null },
         { id: "e_arpu_forecast", day: 365 },
         { id: "e_roas_forecast", day: 365 },
+        { id: "e_roas_forecast", day: 730 },
         { id: "e_profit_forecast", day: 730 }
       ],
       havingFilters: [],
@@ -120,7 +121,7 @@ function processCampaignStatsToSheet(response) {
   const headers = [
     'Campaign Name', 'Campaign ID', 'Target CPA', 'Recommended Target CPA',
     'Installs', 'CPI', 'Spend', 'IPM', 'Forecasted ARPU', 'ROAS', 
-    'Forecasted Profit', 'Created At', 'Last Updated', 'Last Bid Changed', 'is automated'
+    'ROAS 730', 'Forecasted Profit', 'Created At', 'Last Updated', 'Last Bid Changed', 'is automated'
   ];
   
   const formatValue = (value, precision = 2) => {
@@ -137,15 +138,23 @@ function processCampaignStatsToSheet(response) {
   if (response?.data?.analytics?.richStats?.stats) {
     response.data.analytics.richStats.stats.forEach(campaignData => {
       const campaign = campaignData[0];
-      const [cpi, installs, ipm, spend, arpu, roas, profit] = 
+      const [cpi, installs, ipm, spend, arpu, roas365, roas730, profit] = 
         campaignData.slice(1).map(item => formatValue(item.value));
+      
+      // Отладка: выводим первую кампанию для проверки
+      if (processedCampaigns === 0) {
+        UTILS.log(`🔍 Metrics: Пример данных первой кампании:`);
+        UTILS.log(`   - Campaign: ${campaign.campaignName}`);
+        UTILS.log(`   - ROAS 365: ${roas365}`);
+        UTILS.log(`   - ROAS 730: ${roas730}`);
+      }
 
       dataToWrite.push([
         campaign.campaignName || 'N/A',
         campaign.campaignId || 'N/A',
         formatValue(campaign.targetCpa),
         formatValue(campaign.recommendedTargetCpa),
-        installs, cpi, spend, ipm, arpu, roas, profit,
+        installs, cpi, spend, ipm, arpu, roas365, roas730, profit,
         formatDate(campaign.createdAt),
         formatDate(campaign.updatedAt),
         formatDate(campaign.lastBidChangedAt),
@@ -185,6 +194,10 @@ function updateBundleGroupedCampaigns() {
   const hiddenHeaders = hiddenStatsData[0];
   const bundleHeaders = bundleGroupedData[0];
   
+  // Отладка: выводим все заголовки Bundle для поиска проблемы
+  UTILS.log(`📊 Metrics: Заголовки Bundle: ${bundleHeaders.join(', ')}`);
+  UTILS.log(`📊 Metrics: Заголовки Hidden: ${hiddenHeaders.join(', ')}`);
+  
   const hiddenIdIdx = UTILS.findColumnIndex(hiddenHeaders, ['Campaign ID']);
   const bundleIdIdx = UTILS.findColumnIndex(bundleHeaders, ['Campaign ID/Link']);
   const bundleLocalIdx = UTILS.findColumnIndex(bundleHeaders, ['Local']);
@@ -202,9 +215,19 @@ function updateBundleGroupedCampaigns() {
     { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eARPU 365'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'Forecasted ARPU') },
     { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'IPM'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'IPM') },
     { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eROAS d365'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'ROAS') },
+    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, ['eROAS d730', 'eroas d730']), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, ['ROAS 730', 'roas 730']) },
     { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eProfit d730'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'Forecasted Profit'), divideBy: 10 },
     { bundleIdx: bundleAutoIdx, hiddenIdx: hiddenAutoIdx }
   ];
+  
+  // Дополнительное логирование для отладки
+  UTILS.log(`🔍 Metrics: Поиск столбца eROAS d730 - индекс: ${UTILS.findColumnIndex(bundleHeaders, ['eROAS d730', 'eroas d730'])}`);
+  UTILS.log(`🔍 Metrics: Поиск столбца ROAS 730 в hidden - индекс: ${UTILS.findColumnIndex(hiddenHeaders, ['ROAS 730', 'roas 730'])}`);
+  
+  // Логируем все найденные столбцы
+  columnsToUpdate.forEach((col, index) => {
+    UTILS.log(`📋 Metrics: Колонка ${index}: Bundle idx=${col.bundleIdx}, Hidden idx=${col.hiddenIdx}`);
+  });
   
   const validColumns = columnsToUpdate.filter(col => col.bundleIdx !== -1 && col.hiddenIdx !== -1);
   UTILS.log(`📋 Metrics: Найдено ${validColumns.length} колонок для обновления`);
@@ -234,6 +257,15 @@ function updateBundleGroupedCampaigns() {
   validRows.forEach(row => {
     const id = row.data[bundleIdIdx];
     if (lookup[id]) {
+      // Отладка: выводим первое совпадение
+      if (matchedCount === 0) {
+        UTILS.log(`🔍 Metrics: Пример обновления для кампании ${id}:`);
+        validColumns.forEach(col => {
+          const val = lookup[id].row[col.hiddenIdx];
+          UTILS.log(`   - ${col.bundleIdx !== -1 ? bundleHeaders[col.bundleIdx] : 'не найден'}: ${val}`);
+        });
+      }
+      
       validColumns.forEach(col => {
         let val = lookup[id].row[col.hiddenIdx];
         if (col.divideBy) val = val / col.divideBy;
@@ -367,12 +399,16 @@ function updateROASValuesOnly() {
   const headers = data[0];
   
   const roasIdx = UTILS.findColumnIndex(headers, 'eROAS d365');
+  const roas730Idx = UTILS.findColumnIndex(headers, ['eROAS d730', 'eroas d730']);
+  
+  UTILS.log(`🔍 Metrics: В updateROASValuesOnly - eROAS d730 индекс: ${roas730Idx}`);
+  
   if (roasIdx === -1) {
     UTILS.log(`❌ Metrics: Не найдена колонка eROAS d365`);
     return;
   }
   
-  UTILS.log(`🔍 Metrics: Найдена колонка eROAS d365: ${roasIdx}`);
+  UTILS.log(`🔍 Metrics: Найдены колонки - eROAS d365: ${roasIdx}, eROAS d730: ${roas730Idx}`);
   
   // Получить валидные строки включая заголовки групп
   const validRows = UTILS.getValidRows(sheet, { includeGroupHeaders: true });
@@ -387,21 +423,39 @@ function updateROASValuesOnly() {
     if (row.isGroupHeader) {
       // Обработать предыдущую группу если есть
       if (currentGroupHeader && currentGroup.length > 0) {
-        let sum = 0, count = 0;
-        
+        // eROAS d365
+        let sum365 = 0, count365 = 0;
         currentGroup.forEach(groupRow => {
           const value = UTILS.parseNumber(groupRow.data[roasIdx]);
           if (value !== null) {
-            sum += value;
-            count++;
+            sum365 += value;
+            count365++;
           }
         });
         
-        if (count > 0) {
-          const avg = (sum / count).toFixed(2);
+        if (count365 > 0) {
+          const avg = (sum365 / count365).toFixed(2);
           updates.push({ row: currentGroupHeader.index + 1, col: roasIdx + 1, value: avg });
-          groupsProcessed++;
         }
+        
+        // eROAS d730
+        if (roas730Idx !== -1) {
+          let sum730 = 0, count730 = 0;
+          currentGroup.forEach(groupRow => {
+            const value = UTILS.parseNumber(groupRow.data[roas730Idx]);
+            if (value !== null) {
+              sum730 += value;
+              count730++;
+            }
+          });
+          
+          if (count730 > 0) {
+            const avg = (sum730 / count730).toFixed(2);
+            updates.push({ row: currentGroupHeader.index + 1, col: roas730Idx + 1, value: avg });
+          }
+        }
+        
+        groupsProcessed++;
       }
       
       // Начать новую группу
@@ -414,21 +468,39 @@ function updateROASValuesOnly() {
   
   // Обработать последнюю группу
   if (currentGroupHeader && currentGroup.length > 0) {
-    let sum = 0, count = 0;
-    
+    // eROAS d365
+    let sum365 = 0, count365 = 0;
     currentGroup.forEach(groupRow => {
       const value = UTILS.parseNumber(groupRow.data[roasIdx]);
       if (value !== null) {
-        sum += value;
-        count++;
+        sum365 += value;
+        count365++;
       }
     });
     
-    if (count > 0) {
-      const avg = (sum / count).toFixed(2);
+    if (count365 > 0) {
+      const avg = (sum365 / count365).toFixed(2);
       updates.push({ row: currentGroupHeader.index + 1, col: roasIdx + 1, value: avg });
-      groupsProcessed++;
     }
+    
+    // eROAS d730
+    if (roas730Idx !== -1) {
+      let sum730 = 0, count730 = 0;
+      currentGroup.forEach(groupRow => {
+        const value = UTILS.parseNumber(groupRow.data[roas730Idx]);
+        if (value !== null) {
+          sum730 += value;
+          count730++;
+        }
+      });
+      
+      if (count730 > 0) {
+        const avg = (sum730 / count730).toFixed(2);
+        updates.push({ row: currentGroupHeader.index + 1, col: roas730Idx + 1, value: avg });
+      }
+    }
+    
+    groupsProcessed++;
   }
   
   UTILS.log(`📈 Metrics: Обработано групп: ${groupsProcessed}, подготовлено ${updates.length} обновлений ROAS`);

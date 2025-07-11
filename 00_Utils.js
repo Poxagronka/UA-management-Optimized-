@@ -91,15 +91,39 @@ const UTILS = {
     return /^\d+$/.test(str.trim()) ? str.trim() : null;
   },
 
-  // Поиск индекса колонки
+  // Поиск индекса колонки - УЛУЧШЕННАЯ ВЕРСИЯ
   findColumnIndex: (headers, patterns) => {
-    const normalized = headers.map(h => String(h).toLowerCase().trim());
+    // Нормализация заголовков - убираем лишние пробелы и приводим к lowercase
+    const normalized = headers.map(h => String(h).toLowerCase().trim().replace(/\s+/g, ' '));
     const searchPatterns = Array.isArray(patterns) ? patterns : [patterns];
     
-    for (const pattern of searchPatterns) {
-      const index = normalized.indexOf(pattern.toLowerCase());
-      if (index !== -1) return index;
+    // Отладка для проблемных столбцов
+    if (searchPatterns.some(p => p && p.toString().toLowerCase().includes('eroas d730'))) {
+      UTILS.log(`🔍 Utils: Поиск столбца eROAS d730 среди заголовков: [${normalized.slice(15, 25).join(', ')}]`);
     }
+    
+    for (const pattern of searchPatterns) {
+      if (!pattern) continue;
+      const normalizedPattern = pattern.toLowerCase().trim().replace(/\s+/g, ' ');
+      const index = normalized.indexOf(normalizedPattern);
+      if (index !== -1) {
+        if (normalizedPattern.includes('eroas d730')) {
+          UTILS.log(`✅ Utils: Найден столбец '${pattern}' в позиции ${index}`);
+        }
+        return index;
+      }
+    }
+    
+    // Если не нашли точное совпадение, пробуем частичное для eROAS d730
+    if (searchPatterns.some(p => p && p.toString().toLowerCase().includes('eroas d730'))) {
+      for (let i = 0; i < normalized.length; i++) {
+        if (normalized[i].includes('eroas') && normalized[i].includes('730')) {
+          UTILS.log(`✅ Utils: Найден столбец eROAS d730 по частичному совпадению в позиции ${i}: '${headers[i]}'`);
+          return i;
+        }
+      }
+    }
+    
     return -1;
   },
 
