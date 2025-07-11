@@ -2,29 +2,35 @@
 function manageCampaignActions() {
   UTILS.log('🎯 CampManager: Начинаем manageCampaignActions');
   
-  const currentHour = new Date().getHours();
-  UTILS.log(`🕐 CampManager: Текущий час: ${currentHour}`);
+  const now = new Date();
+  const currentHour = now.getHours();
+  const timezone = now.toString().match(/GMT[+-]\d{4}/)?.[0] || 'Unknown';
+  UTILS.log(`🕐 CampManager: Текущее время: ${now.toISOString()}, Час: ${currentHour}, Timezone: ${timezone}`);
   
-  if (!isAfter1AM()) {
-    UTILS.log('⏰ CampManager: Слишком рано для выполнения (до 1 AM)');
+  // СТРОГАЯ проверка времени - только после 3:00
+  if (currentHour < 3) {
+    UTILS.log(`⏰ CampManager: Слишком рано для выполнения (${currentHour}:xx < 3:00). Выход.`);
     return;
   }
   
   UTILS.log('🔄 CampManager: Перезапускаем остановленные кампании');
   restartStoppedCampaigns();
   
-  if (isAfter3AM()) {
-    UTILS.log('📊 CampManager: Управляем кампаниями на основе установок (после 3 AM)');
-    manageCampaignsBasedOnInstalls();
-  } else {
-    UTILS.log('⏰ CampManager: Слишком рано для управления установками (до 3 AM)');
-  }
+  UTILS.log('📊 CampManager: Управляем кампаниями на основе установок (после 3 AM)');
+  manageCampaignsBasedOnInstalls();
   
   UTILS.log('✅ CampManager: manageCampaignActions завершен');
 }
 
 function stopCampaignIfHighImpressionsOrSpend() {
   UTILS.log('🛑 CampManager: Начинаем stopCampaignIfHighImpressionsOrSpend');
+  
+  // Добавляем проверку времени для безопасности
+  const currentHour = new Date().getHours();
+  if (currentHour < 3) {
+    UTILS.log(`⏰ CampManager: Функция stopCampaignIfHighImpressionsOrSpend пропущена (${currentHour}:xx < 3:00)`);
+    return;
+  }
   
   const sheet = UTILS.getSheet("Planning", UTILS.CONFIG.SPREADSHEET_ID);
   if (!sheet) {
@@ -76,117 +82,6 @@ function stopCampaignIfHighImpressionsOrSpend() {
   UTILS.log('✅ CampManager: stopCampaignIfHighImpressionsOrSpend завершен');
 }
 
-function increaseOptimizationUntilActive() {
-  UTILS.log('📈 CampManager: Начинаем increaseOptimizationUntilActive');
-  
-  const sheet = UTILS.getSheet("Planning", UTILS.CONFIG.SPREADSHEET_ID);
-  if (!sheet) return;
-  
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  
-  const columnMap = {
-    campaignId: UTILS.findColumnIndex(headers, ['campaign id/link']),
-    status: UTILS.findColumnIndex(headers, ['campaign status']),
-    pace: UTILS.findColumnIndex(headers, ['pace']),
-    spend: UTILS.findColumnIndex(headers, ['spend in the last 14 days']),
-    pricing: UTILS.findColumnIndex(headers, ['optimization']),
-    optValue: UTILS.findColumnIndex(headers, ['latest optimization value']),
-    freeze: UTILS.findColumnIndex(headers, ['optimization freeze timestamp'])
-  };
-  
-  if (columnMap.freeze === -1) {
-    const newCol = sheet.getLastColumn() + 1;
-    sheet.getRange(1, newCol).setValue("Optimization Freeze Timestamp");
-    columnMap.freeze = newCol - 1;
-  }
-  
-  if (Object.values(columnMap).some(idx => idx === -1)) return;
-  
-  const now = new Date();
-  const formattedNow = UTILS.formatDate(now, "yyyy-MM-dd HH:mm");
-  const updates = [];
-  
-  const validRows = UTILS.getValidRows(sheet);
-  
-  validRows.forEach(row => {
-    const campaignId = UTILS.extractCampaignId(row.data[columnMap.campaignId]);
-    const status = String(row.data[columnMap.status] || "").trim().toLowerCase();
-    const pace = UTILS.parseNumber(row.data[columnMap.pace]) || 0;
-    const spend = UTILS.parseNumber(row.data[columnMap.spend]) || 0;
-    const pricing = String(row.data[columnMap.pricing] || "").trim();
-    const optValue = UTILS.parseNumber(row.data[columnMap.optValue]) || 0;
-    const freezeRaw = row.data[columnMap.freeze];
-    
-    if (status === "running") {
-      // Управление freeze timestamp
-      if (pace === 0 && spend === 0 && freezeRaw) {
-        updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: "" });
-      }
-      
-      if (pace !== 0 || spend !== 0) {
-        if (!freezeRaw || typeof freezeRaw !== "string" || freezeRaw.trim() === "") {
-          const freezeInfo = `${formattedNow}|${spend}|${pace}`;
-          updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: freezeInfo });
-          return;
-        } else {
-          const parts = freezeRaw.split("|");
-          if (parts.length < 3) {
-            const newFreezeInfo = `${formattedNow}|${spend}|${pace}`;
-            updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: newFreezeInfo });
-            return;
-          }
-          
-          try {
-            const freezeTime = new Date(parts[0]);
-            const diff = now - freezeTime;
-            
-            if (diff < 3 * 3600 * 1000) return;
-            
-            const freezeSpend = parseFloat(parts[1]) || 0;
-            const freezePace = parseFloat(parts[2]) || 0;
-            const spendDiff = Math.abs(freezeSpend - spend);
-            const paceDiff = Math.abs(freezePace - pace);
-            
-            if (spendDiff < 0.01 && paceDiff < 0.01) {
-              updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: "" });
-            } else {
-              updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: "" });
-              return;
-            }
-          } catch (e) {
-            const newFreezeInfo = `${formattedNow}|${spend}|${pace}`;
-            updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: newFreezeInfo });
-            return;
-          }
-        }
-      }
-      
-      // Увеличение оптимизации
-      let delta = 0;
-      const lowerPricing = pricing.toLowerCase();
-      if (lowerPricing.includes("cpm")) delta = 5;
-      else if (lowerPricing.includes("cpa")) delta = 1;
-      else if (lowerPricing.includes("cpi")) delta = 0.05;
-      
-      if (delta > 0) {
-        const newOptValue = optValue + delta;
-        if (patchCampaign(campaignId, { optimization_value: newOptValue })) {
-          updates.push({ row: row.index + 1, col: columnMap.optValue + 1, value: newOptValue });
-        }
-      }
-    } else if (freezeRaw) {
-      updates.push({ row: row.index + 1, col: columnMap.freeze + 1, value: "" });
-    }
-  });
-  
-  if (updates.length > 0) {
-    UTILS.batchUpdate(sheet, updates);
-  }
-  
-  UTILS.log('✅ CampManager: increaseOptimizationUntilActive завершен');
-}
-
 function restartStoppedCampaigns() {
   UTILS.log('🔄 CampManager: Начинаем restartStoppedCampaigns');
   
@@ -230,12 +125,22 @@ function restartStoppedCampaigns() {
 function manageCampaignsBasedOnInstalls() {
   UTILS.log('📊 CampManager: Начинаем manageCampaignsBasedOnInstalls');
   
-  // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА ВРЕМЕНИ для безопасности
-  const currentHour = new Date().getHours();
+  // КРИТИЧЕСКИ ВАЖНАЯ ПРОВЕРКА ВРЕМЕНИ
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  const timeString = `${currentHour.toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`;
+  
+  UTILS.log(`🕐 CampManager: Текущее время: ${now.toISOString()}, Локальное: ${timeString}`);
+  
+  // СТРОГАЯ проверка - НИ В КОЕМ СЛУЧАЕ не выполнять до 3:00
   if (currentHour < 3) {
-    UTILS.log(`⏰ CampManager: Слишком рано для остановки по лимиту инсталов (${currentHour}:xx < 3:00)`);
+    UTILS.log(`❌ CampManager: ЗАПРЕЩЕНО! Остановка по лимиту инсталов разрешена только после 3:00. Текущее время: ${timeString}`);
+    UTILS.log(`❌ CampManager: Функция manageCampaignsBasedOnInstalls ПРИНУДИТЕЛЬНО ПРЕРВАНА`);
     return;
   }
+  
+  UTILS.log(`✅ CampManager: Время проверено - ${timeString} >= 03:00. Продолжаем выполнение.`);
   
   const sheet = UTILS.getSheet("Bundle Grouped Campaigns", UTILS.CONFIG.SPREADSHEET_ID);
   if (!sheet) return;
@@ -261,10 +166,11 @@ function manageCampaignsBasedOnInstalls() {
   
   const validRows = UTILS.getValidRows(sheet);
   const campaignsToStop = [];
-  const now = new Date();
   const dateTimeFormat = UTILS.formatDate(now, "yyyy-MM-dd HH:mm");
   const today = UTILS.formatDate(now, "yyyy-MM-dd");
   const updates = [];
+  
+  UTILS.log(`📊 CampManager: Начинаем проверку лимитов инсталов в ${dateTimeFormat}`);
   
   validRows.forEach(row => {
     const campaignId = UTILS.extractCampaignId(row.data[columnMap.campaignId]);
@@ -283,6 +189,7 @@ function manageCampaignsBasedOnInstalls() {
     }
     
     if (todayInstalls > installLimit && (!status || status.toLowerCase() === "running")) {
+      UTILS.log(`🛑 CampManager: Кампания ${campaignId} превысила лимит: ${todayInstalls} > ${installLimit}`);
       campaignsToStop.push(campaignId);
       
       if (columnMap.stoppedByLimit !== -1) {
@@ -301,19 +208,13 @@ function manageCampaignsBasedOnInstalls() {
     if (updates.length > 0) {
       UTILS.batchUpdate(sheet, updates);
     }
-    UTILS.log(`✅ CampManager: Остановлено ${campaignsToStop.length} кампаний по лимиту инсталов`);
+    UTILS.log(`✅ CampManager: Остановлено ${campaignsToStop.length} кампаний по лимиту инсталов в ${dateTimeFormat}`);
+  } else {
+    UTILS.log(`✅ CampManager: Нет кампаний для остановки по лимиту инсталов в ${dateTimeFormat}`);
   }
 }
 
-// Утилитарные функции
-function isAfter1AM() {
-  return new Date().getHours() >= 1;
-}
-
-function isAfter3AM() {
-  return new Date().getHours() >= 3;
-}
-
+// Утилитарные функции (убираем, так как они могут обходить проверки)
 function stopCampaigns(campaignIds) {
   UTILS.log(`🛑 CampManager: Останавливаем ${campaignIds.length} кампаний`);
   
