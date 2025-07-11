@@ -33,13 +33,13 @@ function checkHighCPI() {
   UTILS.log(`📊 CPI: Найдено ${validRows.length} валидных строк для обработки`);
   
   const colors = [], weights = [], eroasColors = [], eroasWeights = [];
-  const blackColor = '#000000', blueColor = '#4169E1', redColor = '#EF5350', greenColor = '#4CAF50';
+  const blackColor = '#000000', blueColor = '#4169E1', redColor = '#EF5350';
   
   // Инициализация массивов для всех строк данных
   for (let i = 0; i < data.length - 1; i++) {
     colors.push([blackColor]);
     weights.push(['normal']);
-    if (columnMap.eroas !== -1) {
+    if (columnMap.eroas730 !== -1) {
       eroasColors.push([blackColor]);
       eroasWeights.push(['normal']);
     }
@@ -68,17 +68,7 @@ function checkHighCPI() {
         automatedSkipped++;
       }
       
-      // Проверка eROAS d365
-      if (columnMap.eroas !== -1) {
-        const eroasVal = UTILS.parseNumber(row.data[columnMap.eroas]);
-        if (eroasVal !== null && eroasVal < 80) {
-          eroasColors[arrayIndex] = [redColor];
-          eroasWeights[arrayIndex] = ['bold'];
-          eroasLowCount++;
-        }
-      }
-      
-      // Проверка eROAS d730 (цель > 250%)
+      // Проверка eROAS d730 (основной фокус)
       if (columnMap.eroas730 !== -1) {
         const eroas730Val = UTILS.parseNumber(row.data[columnMap.eroas730]);
         if (eroas730Val !== null) {
@@ -106,18 +96,18 @@ function checkHighCPI() {
   
   UTILS.log(`🎨 CPI: Применено форматирование CPI для ${data.length - 1} строк`);
   
-  if (columnMap.eroas !== -1 || columnMap.eroas730 !== -1) {
-    const eroasRange = sheet.getRange(2, (columnMap.eroas730 !== -1 ? columnMap.eroas730 : columnMap.eroas) + 1, data.length - 1);
+  if (columnMap.eroas730 !== -1) {
+    const eroasRange = sheet.getRange(2, columnMap.eroas730 + 1, data.length - 1);
     eroasRange.setFontColors(eroasColors);
     eroasRange.setFontWeights(eroasWeights);
-    UTILS.log(`🎨 CPI: Применено форматирование eROAS для ${data.length - 1} строк`);
+    UTILS.log(`🎨 CPI: Применено форматирование eROAS d730 для ${data.length - 1} строк`);
   }
   
   // Итоговая статистика
   const stats = [];
   if (cpiLimitCount > 0) stats.push(`CPI превышает лимит: ${cpiLimitCount}`);
   if (eroasTargetCount > 0) stats.push(`eROAS d730 >= 250%: ${eroasTargetCount}`);
-  if (eroasLowCount > 0) stats.push(`eROAS низкий: ${eroasLowCount}`);
+  if (eroasLowCount > 0) stats.push(`eROAS d730 низкий: ${eroasLowCount}`);
   if (automatedSkipped > 0) stats.push(`Автоматических пропущено: ${automatedSkipped}`);
   
   UTILS.log(`📊 CPI: Статистика - ${stats.join(', ')}`);

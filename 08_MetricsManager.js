@@ -1,6 +1,6 @@
 // 08_MetricsManager.gs - Объединенный менеджер метрик с расширенными данными
 function updateEROASData() {
-  UTILS.log('📊 Metrics: Начинаем updateEROASData с расширенными метриками');
+  UTILS.log('📊 Metrics: Начинаем updateEROASData с расширенными метриками (взвешенный по спенду eROAS d730)');
   
   const dateRange = UTILS.getDateRange(29); // Увеличиваем период для более точных данных
   const endDate = new Date();
@@ -128,7 +128,7 @@ function updateEROASData() {
     
     processCampaignStatsToSheet(jsonResponse);
     
-    UTILS.log('✅ Metrics: updateEROASData завершен успешно');
+    UTILS.log('✅ Metrics: updateEROASData завершен успешно (взвешенный по спенду eROAS d730)');
     return jsonResponse;
     
   } catch (error) {
@@ -138,7 +138,7 @@ function updateEROASData() {
 }
 
 function processCampaignStatsToSheet(response) {
-  UTILS.log('📝 Metrics: Начинаем обработку расширенной статистики кампаний');
+  UTILS.log('📝 Metrics: Начинаем обработку расширенной статистики кампаний (взвешенный по спенду eROAS d730)');
   
   const ss = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
   
@@ -153,7 +153,7 @@ function processCampaignStatsToSheet(response) {
   
   statsSheet.clear();
   
-  // Расширенные заголовки с новыми метриками
+  // Расширенные заголовки с новыми метриками (взвешенный по спенду eROAS d730)
   const headers = [
     'Campaign Name', 'Campaign ID', 'Target CPA', 'Recommended Target CPA',
     'Installs', 'CPI', 'Spend', 'IPM', 
@@ -193,7 +193,7 @@ function processCampaignStatsToSheet(response) {
         UTILS.log(`   - Campaign: ${campaign.campaignName}`);
         UTILS.log(`   - Retention D1: ${ret1}, D7: ${ret7}, D30: ${ret30}`);
         UTILS.log(`   - ROAS D1: ${roas1}, D7: ${roas7}`);
-        UTILS.log(`   - eARPU 365: ${arpu365}, Cumulative ARPU 730: ${cumulativeArpu730}`);
+        UTILS.log(`   - eARPU 365: ${arpu365}, eROAS 730: ${eroas730}, Cumulative ARPU 730: ${cumulativeArpu730}`);
       }
 
       dataToWrite.push([
@@ -219,14 +219,14 @@ function processCampaignStatsToSheet(response) {
 
   if (dataToWrite.length > 1) {
     statsSheet.getRange(1, 1, dataToWrite.length, headers.length).setValues(dataToWrite);
-    UTILS.log(`✅ Metrics: Записано ${dataToWrite.length - 1} строк в лист AppodealStatsHidden`);
+    UTILS.log(`✅ Metrics: Записано ${dataToWrite.length - 1} строк в лист AppodealStatsHidden (взвешенный по спенду eROAS d730)`);
   } else {
     UTILS.log(`⚠️ Metrics: Нет данных для записи`);
   }
 }
 
 function updateBundleGroupedCampaigns() {
-  UTILS.log('🔄 Metrics: Начинаем updateBundleGroupedCampaigns');
+  UTILS.log('🔄 Metrics: Начинаем updateBundleGroupedCampaigns (взвешенный по спенду eROAS d730)');
   
   const spreadsheet = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
   const hiddenStatsSheet = spreadsheet.getSheetByName('AppodealStatsHidden');
@@ -261,7 +261,6 @@ function updateBundleGroupedCampaigns() {
   const columnsToUpdate = [
     { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eARPU 365'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'eARPU 365') },
     { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'IPM'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'IPM') },
-    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eROAS d365'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'eROAS 365') },
     { bundleIdx: UTILS.findColumnIndex(bundleHeaders, ['eROAS d730', 'eroas d730']), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, ['eROAS 730']) },
     { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eProfit d730'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'eProfit 730'), divideBy: 10 },
     { bundleIdx: bundleAutoIdx, hiddenIdx: hiddenAutoIdx }
@@ -316,20 +315,21 @@ function updateBundleGroupedCampaigns() {
     UTILS.log(`✅ Metrics: Применено ${updates.length} обновлений`);
   }
   
-  UTILS.log('✅ Metrics: updateBundleGroupedCampaigns завершен');
+  UTILS.log('✅ Metrics: updateBundleGroupedCampaigns завершен (взвешенный по спенду eROAS d730)');
 }
 
 function groupMetrics() {
-  UTILS.log('📊 Metrics: Начинаем groupMetrics');
+  UTILS.log('📊 Metrics: Начинаем groupMetrics (взвешенный по спенду eROAS d730)');
   
   updateBundleGroupTotals();
   updateROASValuesOnly();
+  updateOverallMetrics(); // Добавляем расчет для строки Overall
   
-  UTILS.log('✅ Metrics: groupMetrics завершен');
+  UTILS.log('✅ Metrics: groupMetrics завершен (взвешенный по спенду eROAS d730)');
 }
 
 function updateBundleGroupTotals() {
-  UTILS.log('🧮 Metrics: Начинаем updateBundleGroupTotals');
+  UTILS.log('🧮 Metrics: Начинаем updateBundleGroupTotals (взвешенный по спенду eROAS d730)');
   
   const sheet = UTILS.getSheet("Bundle Grouped Campaigns", UTILS.CONFIG.SPREADSHEET_ID);
   if (!sheet) {
@@ -412,7 +412,7 @@ function updateBundleGroupTotals() {
     UTILS.batchUpdate(sheet, updates);
   }
   
-  UTILS.log('✅ Metrics: updateBundleGroupTotals завершен');
+  UTILS.log('✅ Metrics: updateBundleGroupTotals завершен (взвешенный по спенду eROAS d730)');
 }
 
 function updateROASValuesOnly() {
@@ -540,11 +540,118 @@ function updateROASValuesOnly() {
 }
 
 function clearMetricsCache() {
-  UTILS.log('🗑️ Metrics: Очищаем кеш метрик');
+  UTILS.log('🗑️ Metrics: Очищаем кеш метрик (взвешенный по спенду eROAS d730)');
   
   // Очистка кеша метрик при необходимости
-  const cacheKeys = ['bundle_group_totals_', 'bundle_roas_values_'];
+  const cacheKeys = ['bundle_group_totals_', 'weighted_roas_values_730_'];
   cacheKeys.forEach(key => UTILS.cache.remove(key));
   
-  UTILS.log('✅ Metrics: Кеш метрик очищен');
+  UTILS.log('✅ Metrics: Кеш метрик очищен (взвешенный по спенду eROAS d730)');
+}
+
+function updateOverallMetrics() {
+  UTILS.log('🌍 Metrics: Начинаем updateOverallMetrics для строки Overall');
+  
+  const sheet = UTILS.getSheet("Bundle Grouped Campaigns", UTILS.CONFIG.SPREADSHEET_ID);
+  if (!sheet) {
+    UTILS.log('❌ Metrics: Лист Bundle Grouped Campaigns не найден');
+    return;
+  }
+  
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  
+  // Поиск необходимых колонок
+  const roas730Idx = UTILS.findColumnIndex(headers, ['eROAS d730', 'eroas d730']);
+  const eProfit730Idx = UTILS.findColumnIndex(headers, ['eProfit d730', 'eprofit d730']);
+  const spendIdx = UTILS.findColumnIndex(headers, ['spend in the last 14 days', 'today spend', 'spend']);
+  
+  if (roas730Idx === -1 || eProfit730Idx === -1) {
+    UTILS.log(`❌ Metrics: Не найдены необходимые колонки - eROAS d730: ${roas730Idx}, eProfit d730: ${eProfit730Idx}`);
+    return;
+  }
+  
+  if (spendIdx === -1) {
+    UTILS.log(`❌ Metrics: Не найдена колонка Spend для взвешивания`);
+    return;
+  }
+  
+  UTILS.log(`🔍 Metrics: Найдены колонки - eROAS d730: ${roas730Idx}, eProfit d730: ${eProfit730Idx}, Spend: ${spendIdx}`);
+  
+  // Поиск строки Overall
+  let overallRowIndex = -1;
+  for (let i = 1; i < data.length; i++) {
+    const cellValue = String(data[i][0] || '').toLowerCase().trim();
+    if (cellValue === 'overall') {
+      overallRowIndex = i;
+      break;
+    }
+  }
+  
+  if (overallRowIndex === -1) {
+    UTILS.log('❌ Metrics: Не найдена строка Overall');
+    return;
+  }
+  
+  UTILS.log(`🎯 Metrics: Найдена строка Overall в позиции ${overallRowIndex + 1}`);
+  
+  // Получение только валидных кампаний (исключаем группы и Overall)
+  const validRows = UTILS.getValidRows(sheet, { startRow: 1 });
+  const campaignRows = validRows.filter(row => 
+    row.index !== overallRowIndex && // Исключаем саму строку Overall
+    !row.isGroupHeader // Исключаем заголовки групп
+  );
+  
+  UTILS.log(`📊 Metrics: Найдено ${campaignRows.length} валидных кампаний для расчета Overall`);
+  
+  if (campaignRows.length === 0) {
+    UTILS.log('⚠️ Metrics: Нет валидных кампаний для расчета Overall');
+    return;
+  }
+  
+  // Расчет взвешенного среднего eROAS d730
+  const overallWeightedROAS = calculateWeightedROAS(campaignRows, roas730Idx, spendIdx);
+  
+  // Расчет общего eProfit d730
+  let totalProfit = 0;
+  let validProfitCampaigns = 0;
+  
+  campaignRows.forEach(row => {
+    const profit = UTILS.parseNumber(row.data[eProfit730Idx]);
+    if (profit !== null) {
+      totalProfit += profit;
+      validProfitCampaigns++;
+    }
+  });
+  
+  UTILS.log(`💰 Metrics: Overall eProfit d730 - Кампаний: ${validProfitCampaigns}/${campaignRows.length}, Общий профит: ${totalProfit.toFixed(2)}`);
+  
+  // Подготовка обновлений
+  const updates = [];
+  
+  if (overallWeightedROAS !== null) {
+    updates.push({
+      row: overallRowIndex + 1,
+      col: roas730Idx + 1,
+      value: overallWeightedROAS
+    });
+    UTILS.log(`📈 Metrics: Overall взвешенный eROAS d730: ${overallWeightedROAS}%`);
+  }
+  
+  if (validProfitCampaigns > 0) {
+    updates.push({
+      row: overallRowIndex + 1,
+      col: eProfit730Idx + 1,
+      value: totalProfit.toFixed(2)
+    });
+    UTILS.log(`💰 Metrics: Overall eProfit d730: ${totalProfit.toFixed(2)}`);
+  }
+  
+  // Применение обновлений
+  if (updates.length > 0) {
+    UTILS.batchUpdate(sheet, updates);
+    UTILS.log(`✅ Metrics: Применено ${updates.length} обновлений для строки Overall`);
+  }
+  
+  UTILS.log('✅ Metrics: updateOverallMetrics завершен');
 }
