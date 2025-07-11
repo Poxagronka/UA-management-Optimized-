@@ -1,109 +1,92 @@
 function updateBundleGroupedCampaigns() {
-  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  var hiddenStatsSheet = spreadsheet.getSheetByName('AppodealStatsHidden');
-  var bundleGroupedSheet = spreadsheet.getSheetByName('Bundle Grouped Campaigns');
+  UTILS.log('🔄 Metrics: Начинаем updateBundleGroupedCampaigns (взвешенный по спенду eROAS d730)');
+  
+  const spreadsheet = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
+  const hiddenStatsSheet = spreadsheet.getSheetByName('AppodealStatsHidden');
+  const bundleGroupedSheet = spreadsheet.getSheetByName('Bundle Grouped Campaigns');
   
   if (!hiddenStatsSheet || !bundleGroupedSheet) {
-    throw new Error('One or both sheets not found. Please check sheet names.');
+    UTILS.log(`❌ Metrics: Не найдены необходимые листы - Hidden: ${!!hiddenStatsSheet}, Bundle: ${!!bundleGroupedSheet}`);
+    throw new Error('Required sheets not found');
   }
   
-  var hiddenStatsData = hiddenStatsSheet.getDataRange().getValues();
-  var bundleGroupedData = bundleGroupedSheet.getDataRange().getValues();
+  const hiddenStatsData = hiddenStatsSheet.getDataRange().getValues();
+  const bundleGroupedData = bundleGroupedSheet.getDataRange().getValues();
   
-  function findColumnIndexExact(headerRow, targetName) {
-    for (var i = 0; i < headerRow.length; i++) {
-      if (headerRow[i] === targetName) return i;
-    }
-    return -1;
-  }
+  UTILS.log(`📊 Metrics: Исходные данные - Hidden: ${hiddenStatsData.length - 1} строк, Bundle: ${bundleGroupedData.length - 1} строк`);
   
-  function extractLocale(campaignName) {
-    var m = campaignName.match(/\b([A-Z]{3})\b/);
-    return m ? m[1] : '';
-  }
+  const hiddenHeaders = hiddenStatsData[0];
+  const bundleHeaders = bundleGroupedData[0];
   
-  var hiddenHeaders = hiddenStatsData[0];
-  var bundleHeaders = bundleGroupedData[0];
+  const hiddenIdIdx = UTILS.findColumnIndex(hiddenHeaders, ['Campaign ID']);
+  const bundleIdIdx = UTILS.findColumnIndex(bundleHeaders, ['Campaign ID/Link']);
+  const bundleLocalIdx = UTILS.findColumnIndex(bundleHeaders, ['Local']);
+  const hiddenAutoIdx = UTILS.findColumnIndex(hiddenHeaders, ['Is Automated']);
+  const bundleAutoIdx = UTILS.findColumnIndex(bundleHeaders, ['Is Automated']);
   
-  var hiddenIdIdx = findColumnIndexExact(hiddenHeaders, 'Campaign ID');
-  var bundleIdIdx = findColumnIndexExact(bundleHeaders, 'Campaign ID/Link');
-  var bundleLocalIdx = findColumnIndexExact(bundleHeaders, 'Local');
-  var hiddenAutoIdx = findColumnIndexExact(hiddenHeaders, 'is automated');
-  var bundleAutoIdx = findColumnIndexExact(bundleHeaders, 'Is Automated');
+  UTILS.log(`🔍 Metrics: Найдены колонки - Hidden ID: ${hiddenIdIdx}, Bundle ID: ${bundleIdIdx}, Local: ${bundleLocalIdx}, Auto: ${hiddenAutoIdx}/${bundleAutoIdx}`);
   
   if ([hiddenIdIdx, bundleIdIdx, bundleLocalIdx, hiddenAutoIdx, bundleAutoIdx].some(idx => idx === -1)) {
-    throw new Error('Ensure Campaign ID, Local, and Is Automated columns exist.');
+    UTILS.log(`❌ Metrics: Не найдены необходимые колонки`);
+    throw new Error('Required columns not found');
   }
   
-  var columnsToUpdate = [
-    {
-      bundleIdx: findColumnIndexExact(bundleHeaders, 'eARPU 365'),
-      hiddenIdx: findColumnIndexExact(hiddenHeaders, 'Forecasted ARPU')
-    },
-    {
-      bundleIdx: findColumnIndexExact(bundleHeaders, 'IPM'),
-      hiddenIdx: findColumnIndexExact(hiddenHeaders, 'IPM')
-    },
-    {
-      bundleIdx: findColumnIndexExact(bundleHeaders, 'eROAS d365'),
-      hiddenIdx: findColumnIndexExact(hiddenHeaders, 'ROAS')
-    },
-    {
-      bundleIdx: findColumnIndexExact(bundleHeaders, 'eROAS d730'),
-      hiddenIdx: findColumnIndexExact(hiddenHeaders, 'ROAS 730')
-    },
-    {
-      bundleIdx: findColumnIndexExact(bundleHeaders, 'eProfit d730'),
-      hiddenIdx: findColumnIndexExact(hiddenHeaders, 'Forecasted Profit'),
-      divideBy: 10
-    },
-    {
-      bundleIdx: bundleAutoIdx,
-      hiddenIdx: hiddenAutoIdx
-    }
+  const columnsToUpdate = [
+    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eARPU 365'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'eARPU 365') },
+    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'IPM'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'IPM') },
+    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, ['eROAS d730', 'eroas d730']), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, ['eROAS 730']) },
+    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eProfit d730'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'eProfit 730'), divideBy: 10 },
+    { bundleIdx: bundleAutoIdx, hiddenIdx: hiddenAutoIdx }
   ];
   
-  columnsToUpdate.forEach(function(col) {
-    if (col.bundleIdx === -1 || col.hiddenIdx === -1) {
-      throw new Error('Column mapping error: ' + JSON.stringify(col));
-    }
-  });
+  const validColumns = columnsToUpdate.filter(col => col.bundleIdx !== -1 && col.hiddenIdx !== -1);
+  UTILS.log(`📋 Metrics: Найдено ${validColumns.length} колонок для обновления`);
   
-  var lookup = {};
-  var nameIdx = findColumnIndexExact(hiddenHeaders, 'Campaign Name');
-  for (var i = 1; i < hiddenStatsData.length; i++) {
-    var id = hiddenStatsData[i][hiddenIdIdx];
-    var name = hiddenStatsData[i][nameIdx] || '';
+  // Создание lookup таблицы
+  const lookup = {};
+  const nameIdx = UTILS.findColumnIndex(hiddenHeaders, 'Campaign Name');
+  
+  for (let i = 1; i < hiddenStatsData.length; i++) {
+    const id = hiddenStatsData[i][hiddenIdIdx];
+    const name = hiddenStatsData[i][nameIdx] || '';
     if (id) {
       lookup[id] = {
         row: hiddenStatsData[i],
-        locale: extractLocale(name)
+        locale: UTILS.extractLocale(name)
       };
     }
   }
   
-  var updates = 0;
-  for (var r = 1; r < bundleGroupedData.length; r++) {
-    var row = bundleGroupedData[r];
-    var id = row[bundleIdIdx];
+  UTILS.log(`🗂️ Metrics: Создана lookup таблица для ${Object.keys(lookup).length} кампаний`);
+  
+  // Применение обновлений только к валидным строкам
+  const validRows = UTILS.getValidRows(bundleGroupedSheet);
+  const updates = [];
+  let matchedCount = 0;
+  
+  validRows.forEach(row => {
+    const id = row.data[bundleIdIdx];
     if (lookup[id]) {
-      columnsToUpdate.forEach(function(col) {
-        var val = lookup[id].row[col.hiddenIdx];
-        if (col.divideBy) {
-          val = val / col.divideBy;
-        }
-        bundleGroupedSheet
-          .getRange(r + 1, col.bundleIdx + 1)
-          .setValue(val);
+      validColumns.forEach(col => {
+        let val = lookup[id].row[col.hiddenIdx];
+        if (col.divideBy) val = val / col.divideBy;
+        updates.push({ row: row.index + 1, col: col.bundleIdx + 1, value: val });
       });
       
-      var loc = lookup[id].locale;
+      const loc = lookup[id].locale;
       if (loc) {
-        bundleGroupedSheet
-          .getRange(r + 1, bundleLocalIdx + 1)
-          .setValue(loc);
+        updates.push({ row: row.index + 1, col: bundleLocalIdx + 1, value: loc });
       }
-      updates++;
+      matchedCount++;
     }
+  });
+  
+  UTILS.log(`🎯 Metrics: Сопоставлено ${matchedCount} кампаний, подготовлено ${updates.length} обновлений`);
+  
+  if (updates.length > 0) {
+    UTILS.batchUpdate(bundleGroupedSheet, updates);
+    UTILS.log(`✅ Metrics: Применено ${updates.length} обновлений`);
   }
+  
+  UTILS.log('✅ Metrics: updateBundleGroupedCampaigns завершен (взвешенный по спенду eROAS d730)');
 }
