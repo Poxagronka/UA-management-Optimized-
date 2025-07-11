@@ -1,4 +1,4 @@
-// 01_Main.gs - Упрощенная версия
+// 01_Main.gs - Упрощенная версия с продвинутой формулой CPI
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Мои скрипты')
@@ -10,6 +10,7 @@ function onOpen() {
     .addItem('Получить отчет Reporting API', 'getReportDataForAllSheets')
     .addItem('Патч Campaign Optimization', 'runPatchCampaignOptimization')
     .addItem('Create source hyperlinks', 'createSourceLinksInPlanning')
+    .addItem('Расчет CPI лимитов', 'runMaxCPICalculation')
     .addToUi();
 }
 
@@ -51,7 +52,7 @@ function main() {
       { name: 'groupMetrics', func: groupMetrics },
       { name: 'copyStatusToTarget', func: copyStatusToTarget },
       { name: 'updateHyperlinks', func: updateHyperlinks },
-      { name: 'runMaxCPICalculation', func: runMaxCPICalculation },
+      { name: 'runMaxCPICalculation', func: runMaxCPICalculation }, // Теперь с продвинутой логикой
       { name: 'checkHighCPI', func: checkHighCPI }
     ];
     

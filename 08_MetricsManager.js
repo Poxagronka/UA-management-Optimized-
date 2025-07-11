@@ -1,12 +1,12 @@
-// 08_MetricsManager.gs - Объединенный менеджер метрик
+// 08_MetricsManager.gs - Объединенный менеджер метрик с расширенными данными
 function updateEROASData() {
-  UTILS.log('📊 Metrics: Начинаем updateEROASData');
+  UTILS.log('📊 Metrics: Начинаем updateEROASData с расширенными метриками');
   
-  const dateRange = UTILS.getDateRange(9);
+  const dateRange = UTILS.getDateRange(29); // Увеличиваем период для более точных данных
   const endDate = new Date();
   endDate.setDate(endDate.getDate() - 2);
   const adjustedRange = {
-    from: UTILS.formatDate(new Date(endDate.getTime() - 9 * 24 * 60 * 60 * 1000)),
+    from: UTILS.formatDate(new Date(endDate.getTime() - 29 * 24 * 60 * 60 * 1000)),
     to: UTILS.formatDate(endDate)
   };
   
@@ -33,14 +33,34 @@ function updateEROASData() {
       ],
       groupBy: [{ dimension: "ATTRIBUTION_CAMPAIGN_HID" }],
       measures: [
+        // Основные метрики
         { id: "cpi", day: null },
         { id: "installs", day: null },
-        { id: "ipm", day: null },
         { id: "spend", day: null },
+        { id: "ipm", day: null },
+        
+        // Retention метрики для оценки качества трафика
+        { id: "retention_rate", day: 1 },
+        { id: "retention_rate", day: 3 },
+        { id: "retention_rate", day: 7 },
+        { id: "retention_rate", day: 14 },
+        { id: "retention_rate", day: 30 },
+        { id: "retention_rate", day: 90 },
+        { id: "retention_rate", day: 180 },
+        { id: "retention_rate", day: 365 },
+        
+        // ROAS метрики для быстрой оценки
+        { id: "roas", day: 1 },
+        { id: "roas", day: 7 },
+        
+        // Прогнозные метрики LTV
         { id: "e_arpu_forecast", day: 365 },
+        { id: "e_arpu_forecast", day: 730 },
+        { id: "cumulative_arpu_forecast", day: 730 },
         { id: "e_roas_forecast", day: 365 },
         { id: "e_roas_forecast", day: 730 },
-        { id: "e_profit_forecast", day: 730 }
+        { id: "e_profit_forecast", day: 730 },
+        { id: "e_revenue_forecast", day: 730 }
       ],
       havingFilters: [],
       anonymizationMode: "OFF",
@@ -51,7 +71,22 @@ function updateEROASData() {
     query: `query RichStats($dateFilters: [DateFilterInput!]!, $filters: [FilterInput!]!, $groupBy: [GroupByInput!]!, $measures: [RichMeasureInput!]!, $havingFilters: [HavingFilterInput!], $anonymizationMode: DataAnonymizationMode, $revenuePredictionVersion: String!, $topFilter: TopFilterInput, $funnelFilter: FunnelAttributes, $isMultiMediation: Boolean) {
       analytics(anonymizationMode: $anonymizationMode) {
         richStats(funnelFilter: $funnelFilter dateFilters: $dateFilters filters: $filters groupBy: $groupBy measures: $measures havingFilters: $havingFilters revenuePredictionVersion: $revenuePredictionVersion topFilter: $topFilter isMultiMediation: $isMultiMediation) {
-          stats { id ... on UaCampaign { hid campaignId campaignName targetCpa recommendedTargetCpa createdAt updatedAt lastBidChangedAt isAutomated __typename } ... on StatsValue { value __typename } ... on ForecastStatsItem { value __typename } __typename }
+          stats { 
+            id 
+            ... on UaCampaign { 
+              hid campaignId campaignName targetCpa recommendedTargetCpa createdAt updatedAt lastBidChangedAt isAutomated __typename 
+            } 
+            ... on StatsValue { 
+              value __typename 
+            } 
+            ... on ForecastStatsItem { 
+              value uncertainForecast __typename 
+            }
+            ... on RetentionStatsValue {
+              value cohortSize __typename
+            }
+            __typename 
+          }
           __typename
         }
         __typename
@@ -68,7 +103,7 @@ function updateEROASData() {
     payload: JSON.stringify(payload)
   };
 
-  UTILS.log('🌐 Metrics: Отправляем GraphQL запрос к Appodeal API');
+  UTILS.log('🌐 Metrics: Отправляем расширенный GraphQL запрос к Appodeal API');
 
   try {
     const response = UrlFetchApp.fetch(UTILS.CONFIG.BASE_URL_APPODEAL, options);
@@ -103,7 +138,7 @@ function updateEROASData() {
 }
 
 function processCampaignStatsToSheet(response) {
-  UTILS.log('📝 Metrics: Начинаем обработку статистики кампаний');
+  UTILS.log('📝 Metrics: Начинаем обработку расширенной статистики кампаний');
   
   const ss = SpreadsheetApp.openById(UTILS.CONFIG.SPREADSHEET_ID);
   
@@ -118,10 +153,15 @@ function processCampaignStatsToSheet(response) {
   
   statsSheet.clear();
   
+  // Расширенные заголовки с новыми метриками
   const headers = [
     'Campaign Name', 'Campaign ID', 'Target CPA', 'Recommended Target CPA',
-    'Installs', 'CPI', 'Spend', 'IPM', 'Forecasted ARPU', 'ROAS', 
-    'ROAS 730', 'Forecasted Profit', 'Created At', 'Last Updated', 'Last Bid Changed', 'is automated'
+    'Installs', 'CPI', 'Spend', 'IPM', 
+    'Retention D1', 'Retention D3', 'Retention D7', 'Retention D14', 'Retention D30', 'Retention D90', 'Retention D180', 'Retention D365',
+    'ROAS D1', 'ROAS D7',
+    'eARPU 365', 'eARPU 730', 'Cumulative ARPU 730',
+    'eROAS 365', 'eROAS 730', 'eProfit 730', 'eRevenue 730',
+    'Created At', 'Last Updated', 'Last Bid Changed', 'Is Automated'
   ];
   
   const formatValue = (value, precision = 2) => {
@@ -138,15 +178,22 @@ function processCampaignStatsToSheet(response) {
   if (response?.data?.analytics?.richStats?.stats) {
     response.data.analytics.richStats.stats.forEach(campaignData => {
       const campaign = campaignData[0];
-      const [cpi, installs, ipm, spend, arpu, roas365, roas730, profit] = 
-        campaignData.slice(1).map(item => formatValue(item.value));
+      
+      // Извлекаем все метрики в правильном порядке
+      const values = campaignData.slice(1);
+      const [cpi, installs, spend, ipm, 
+             ret1, ret3, ret7, ret14, ret30, ret90, ret180, ret365,
+             roas1, roas7,
+             arpu365, arpu730, cumulativeArpu730,
+             eroas365, eroas730, profit730, revenue730] = values.map(item => formatValue(item.value));
       
       // Отладка: выводим первую кампанию для проверки
       if (processedCampaigns === 0) {
         UTILS.log(`🔍 Metrics: Пример данных первой кампании:`);
         UTILS.log(`   - Campaign: ${campaign.campaignName}`);
-        UTILS.log(`   - ROAS 365: ${roas365}`);
-        UTILS.log(`   - ROAS 730: ${roas730}`);
+        UTILS.log(`   - Retention D1: ${ret1}, D7: ${ret7}, D30: ${ret30}`);
+        UTILS.log(`   - ROAS D1: ${roas1}, D7: ${roas7}`);
+        UTILS.log(`   - eARPU 365: ${arpu365}, Cumulative ARPU 730: ${cumulativeArpu730}`);
       }
 
       dataToWrite.push([
@@ -154,7 +201,11 @@ function processCampaignStatsToSheet(response) {
         campaign.campaignId || 'N/A',
         formatValue(campaign.targetCpa),
         formatValue(campaign.recommendedTargetCpa),
-        installs, cpi, spend, ipm, arpu, roas365, roas730, profit,
+        installs, cpi, spend, ipm,
+        ret1, ret3, ret7, ret14, ret30, ret90, ret180, ret365,
+        roas1, roas7,
+        arpu365, arpu730, cumulativeArpu730,
+        eroas365, eroas730, profit730, revenue730,
         formatDate(campaign.createdAt),
         formatDate(campaign.updatedAt),
         formatDate(campaign.lastBidChangedAt),
@@ -194,14 +245,10 @@ function updateBundleGroupedCampaigns() {
   const hiddenHeaders = hiddenStatsData[0];
   const bundleHeaders = bundleGroupedData[0];
   
-  // Отладка: выводим все заголовки Bundle для поиска проблемы
-  UTILS.log(`📊 Metrics: Заголовки Bundle: ${bundleHeaders.join(', ')}`);
-  UTILS.log(`📊 Metrics: Заголовки Hidden: ${hiddenHeaders.join(', ')}`);
-  
   const hiddenIdIdx = UTILS.findColumnIndex(hiddenHeaders, ['Campaign ID']);
   const bundleIdIdx = UTILS.findColumnIndex(bundleHeaders, ['Campaign ID/Link']);
   const bundleLocalIdx = UTILS.findColumnIndex(bundleHeaders, ['Local']);
-  const hiddenAutoIdx = UTILS.findColumnIndex(hiddenHeaders, ['is automated']);
+  const hiddenAutoIdx = UTILS.findColumnIndex(hiddenHeaders, ['Is Automated']);
   const bundleAutoIdx = UTILS.findColumnIndex(bundleHeaders, ['Is Automated']);
   
   UTILS.log(`🔍 Metrics: Найдены колонки - Hidden ID: ${hiddenIdIdx}, Bundle ID: ${bundleIdIdx}, Local: ${bundleLocalIdx}, Auto: ${hiddenAutoIdx}/${bundleAutoIdx}`);
@@ -212,22 +259,13 @@ function updateBundleGroupedCampaigns() {
   }
   
   const columnsToUpdate = [
-    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eARPU 365'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'Forecasted ARPU') },
+    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eARPU 365'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'eARPU 365') },
     { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'IPM'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'IPM') },
-    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eROAS d365'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'ROAS') },
-    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, ['eROAS d730', 'eroas d730']), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, ['ROAS 730', 'roas 730']) },
-    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eProfit d730'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'Forecasted Profit'), divideBy: 10 },
+    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eROAS d365'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'eROAS 365') },
+    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, ['eROAS d730', 'eroas d730']), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, ['eROAS 730']) },
+    { bundleIdx: UTILS.findColumnIndex(bundleHeaders, 'eProfit d730'), hiddenIdx: UTILS.findColumnIndex(hiddenHeaders, 'eProfit 730'), divideBy: 10 },
     { bundleIdx: bundleAutoIdx, hiddenIdx: hiddenAutoIdx }
   ];
-  
-  // Дополнительное логирование для отладки
-  UTILS.log(`🔍 Metrics: Поиск столбца eROAS d730 - индекс: ${UTILS.findColumnIndex(bundleHeaders, ['eROAS d730', 'eroas d730'])}`);
-  UTILS.log(`🔍 Metrics: Поиск столбца ROAS 730 в hidden - индекс: ${UTILS.findColumnIndex(hiddenHeaders, ['ROAS 730', 'roas 730'])}`);
-  
-  // Логируем все найденные столбцы
-  columnsToUpdate.forEach((col, index) => {
-    UTILS.log(`📋 Metrics: Колонка ${index}: Bundle idx=${col.bundleIdx}, Hidden idx=${col.hiddenIdx}`);
-  });
   
   const validColumns = columnsToUpdate.filter(col => col.bundleIdx !== -1 && col.hiddenIdx !== -1);
   UTILS.log(`📋 Metrics: Найдено ${validColumns.length} колонок для обновления`);
@@ -257,15 +295,6 @@ function updateBundleGroupedCampaigns() {
   validRows.forEach(row => {
     const id = row.data[bundleIdIdx];
     if (lookup[id]) {
-      // Отладка: выводим первое совпадение
-      if (matchedCount === 0) {
-        UTILS.log(`🔍 Metrics: Пример обновления для кампании ${id}:`);
-        validColumns.forEach(col => {
-          const val = lookup[id].row[col.hiddenIdx];
-          UTILS.log(`   - ${col.bundleIdx !== -1 ? bundleHeaders[col.bundleIdx] : 'не найден'}: ${val}`);
-        });
-      }
-      
       validColumns.forEach(col => {
         let val = lookup[id].row[col.hiddenIdx];
         if (col.divideBy) val = val / col.divideBy;
@@ -400,8 +429,6 @@ function updateROASValuesOnly() {
   
   const roasIdx = UTILS.findColumnIndex(headers, 'eROAS d365');
   const roas730Idx = UTILS.findColumnIndex(headers, ['eROAS d730', 'eroas d730']);
-  
-  UTILS.log(`🔍 Metrics: В updateROASValuesOnly - eROAS d730 индекс: ${roas730Idx}`);
   
   if (roasIdx === -1) {
     UTILS.log(`❌ Metrics: Не найдена колонка eROAS d365`);
